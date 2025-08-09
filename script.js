@@ -4,11 +4,11 @@ const analyzeBtn = document.getElementById('analyzeBtn');
 const progressContainer = document.getElementById('progress-container');
 const progressBar = document.getElementById('progress-bar');
 const progressText = document.getElementById('progress-text');
+const resultsDiv = document.getElementById('result');
 
-// 読み込み中のプログレスバーをアニメーションさせる関数
+// プログレスバーのアニメーション
 function animateProgressBar() {
     progressContainer.style.display = 'block';
-    
     let progress = 0;
     const update = () => {
         if (progress < 95) {
@@ -22,30 +22,40 @@ function animateProgressBar() {
     requestAnimationFrame(update);
 }
 
-// kuromoji.jsの初期化
-analyzeBtn.textContent = '辞書ダウンロード中...';
-animateProgressBar();
+// kuromoji.jsの初期化 (Promise化してモダンな非同期処理に)
+function initializeTokenizer() {
+    return new Promise((resolve, reject) => {
+        analyzeBtn.textContent = '辞書ダウンロード中...';
+        animateProgressBar();
+        kuromoji.builder({ dicPath: './dict/' }).build(function (err, _tokenizer) {
+            if (err) {
+                console.error('ライブラリの初期化に失敗しました:', err);
+                analyzeBtn.textContent = '初期化失敗';
+                progressContainer.style.display = 'none';
+                reject(err);
+                return;
+            }
+            tokenizer = _tokenizer;
+            progressBar.style.width = '100%';
+            progressText.textContent = `ライブラリのダウンロードは一度だけです。準備完了！`;
+            analyzeBtn.textContent = '判定する';
+            analyzeBtn.disabled = false;
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+            }, 2000);
+            resolve();
+        });
+    });
+}
+initializeTokenizer();
 
-kuromoji.builder({ dicPath: './dict/' }).build(function (err, _tokenizer) {
-    if (err) {
-        console.error('ライブラリの初期化に失敗しました:', err);
-        analyzeBtn.textContent = '初期化失敗';
-        progressContainer.style.display = 'none';
-        return;
-    }
-    tokenizer = _tokenizer;
-    progressBar.style.width = '100%';
-    progressText.textContent = `ライブラリのダウンロードは一度だけです。準備完了！`;
-    analyzeBtn.textContent = '判定する';
-    analyzeBtn.disabled = false;
-    setTimeout(() => {
-        progressContainer.style.display = 'none';
-    }, 2000);
-});
-
-// ヘルパー関数群
+// ヘルパー関数
 function countMorpheme(morphemes, partOfSpeech) {
     return morphemes.filter(m => m.pos === partOfSpeech).length;
+}
+
+function countSubMorpheme(morphemes, subPartOfSpeech) {
+    return morphemes.filter(m => m.pos_detail_1 === subPartOfSpeech).length;
 }
 
 function countPhrases(text, phrases) {
@@ -57,157 +67,66 @@ function countPhrases(text, phrases) {
     return count;
 }
 
-function analyzeSentenceEndVariety(text) {
-    const sentences = text.split(/[。！？]/);
-    const uniqueEnds = new Set();
-    sentences.forEach(s => {
-        s = s.trim();
-        if (s.length > 0) {
-            const lastTwoChars = s.slice(-2);
-            uniqueEnds.add(lastTwoChars);
-        }
-    });
-    return uniqueEnds.size;
-}
-
-/**
- * 日本語の文章を分析し、AIが生成した可能性を判定します。
- */
-function analyzeAIStyle(text) {
-    const length = text.length || 1;
-    let aiScore = 50;
-    
-    // スコア調整を統一的に行うヘルパー関数
-    const addScore = (key, value, text, morphemes = null) => {
-        const weights = {
-            'punctuationRate': 25, 'connectorCount': 15, 'sentenceEndSetSize': 20,
-            'bracketsCount': 10, 'mixedNumber': 15, 'markdownRate': 20,
-            'nounRateAI': 30, 'nounRateHuman': 30, 'particleVariety': 35,
-            'complexConnectors': 25, 'idiomCount': 35, 'sentenceEndVariety': 25,
-            'shortText': 20, 'jargonCount': 30, 'grammaticalErrors': -20,
-            'storyTellerPhrases': 40, 'moralConclusion': 50, 'consistentTone': 30,
-            'perfectGrammar': 30, 'naturalPause': -20, 'repetitivePhrases': 40,
-            'intentionalRepetition': -30, 'adverbVariety': -25
-        };
-        const weight = weights[key] || 1;
-        aiScore += value * weight;
-        if (text.length < 50) aiScore += 10;
-    };
-
-    // 1. 基本的な文字・記号の分析
-    const punctuationRate = (text.match(/[。、]/g) || []).length / length;
-    const connectors = ["しかし", "したがって", "また", "そして", "さらに"];
-    const connectorCount = countPhrases(text, connectors);
-    const bracketsCount = (text.match(/[（）「」『』]/g) || []).length;
-    const hasKanjiNum = /[一二三四五六七八九十]/.test(text) ? 1 : 0;
-    const hasArabicNum = /[0-9]/.test(text) ? 1 : 0;
-    const mixedNumber = hasKanjiNum && hasArabicNum ? 1 : 0;
-    const markdownCount = (text.match(/[#*_`>-]/g) || []).length;
-    const markdownRate = markdownCount / length;
-
-    if (punctuationRate > 0.02) addScore('punctuationRate', 1, text);
-    else if (punctuationRate < 0.005) addScore('punctuationRate', 1, text);
-    else addScore('punctuationRate', -1, text);
-
-    if (connectorCount > 2) addScore('connectorCount', 1, text);
-    else addScore('connectorCount', -1, text);
-
-    if (bracketsCount > 3) addScore('bracketsCount', 1, text);
-    else addScore('bracketsCount', -1, text);
-
-    if (mixedNumber > 0) addScore('mixedNumber', 1, text);
-    else addScore('mixedNumber', -1, text);
-
-    if (markdownRate > 0.01) addScore('markdownRate', 1, text);
-    else addScore('markdownRate', -1, text);
-
-    // 2. 形態素解析による高度な分析を強化
+// 新しい特徴量抽出ロジック
+function extractFeatures(text) {
     const morphemes = tokenizer.tokenize(text);
-    if (morphemes && morphemes.length > 10) {
-        const nounRate = countMorpheme(morphemes, '名詞') / morphemes.length;
-        if (nounRate > 0.45) addScore('nounRateAI', 1, text, morphemes);
-        else if (nounRate < 0.2) addScore('nounRateHuman', 1, text, morphemes);
-        else addScore('nounRateAI', -1, text, morphemes);
-
-        const particleVariety = new Set(morphemes.filter(m => m.pos === '助詞').map(m => m.surface_form)).size;
-        const totalParticles = countMorpheme(morphemes, '助詞');
-        if (totalParticles > 0 && particleVariety / totalParticles < 0.4) {
-            addScore('particleVariety', 1, text, morphemes);
-        } else {
-            addScore('particleVariety', -1, text, morphemes);
-        }
-
-        const adverbs = morphemes.filter(m => m.pos === '副詞').map(m => m.surface_form);
-        const uniqueAdverbs = new Set(adverbs).size;
-        if (adverbs.length > 5 && uniqueAdverbs / adverbs.length < 0.5) {
-             addScore('adverbVariety', 1, text, morphemes);
-        } else {
-             addScore('adverbVariety', -1, text, morphemes);
-        }
-
-        const idioms = ["猫の手も借りたい", "雨後の筍", "情けは人のためならず", "顔が広い", "喉から手が出る"];
-        const idiomCount = countPhrases(text, idioms);
-        addScore('idiomCount', idiomCount > 0 ? -1 : 1, text, morphemes);
-
-        const complexConnectors = ["その一方で", "したがって", "具体的には", "一般的に", "鑑みるに", "総じて"];
-        const complexConnectorCount = countPhrases(text, complexConnectors);
-        if (complexConnectorCount > 0) addScore('complexConnectors', 1, text, morphemes);
-        else addScore('complexConnectors', -1, text, morphemes);
-        
-        const sentenceEndVariety = analyzeSentenceEndVariety(text);
-        if (sentenceEndVariety < 3) addScore('sentenceEndVariety', 1, text, morphemes);
-        else addScore('sentenceEndVariety', -1, text, morphemes);
-
-        const jargonList = ["アルゴリズム", "プロトコル", "パラダイム", "メタデータ", "フレームワーク", "イノベーション", "レガシー"];
-        const jargonCount = countPhrases(text, jargonList);
-        if (jargonCount > 0) addScore('jargonCount', 1, text, morphemes);
-        else addScore('jargonCount', -1, text, morphemes);
-
-        const casualEnds = ["だよね", "じゃん", "みたいな"];
-        const hasCasualEnd = casualEnds.some(end => text.includes(end));
-        if (hasCasualEnd) aiScore -= 30;
-
-        const storyTellerPhrases = ["ある日", "その時", "それ以来", "あるところに"];
-        const storyTellerPhraseCount = countPhrases(text, storyTellerPhrases);
-        if (storyTellerPhraseCount >= 2) addScore('storyTellerPhrases', 1, text, morphemes);
-        
-        const moralConclusionPhrases = ["心が動いた", "優しさが心を変えた", "大切なことを学んだ", "気づかされた", "皆が幸せに暮らしましたとさ"];
-        const moralConclusionCount = countPhrases(text, moralConclusionPhrases);
-        if (moralConclusionCount > 0) addScore('moralConclusion', 1, text, morphemes);
-
-        const sentenceEnds = ["です", "ます", "だ", "である"];
-        const finalSentenceEnds = morphemes.filter(m => m.pos === '助動詞' && sentenceEnds.includes(m.surface_form)).map(m => m.surface_form);
-        const uniqueFinalEnds = new Set(finalSentenceEnds).size;
-        if (finalSentenceEnds.length > 3 && uniqueFinalEnds === 1) {
-            addScore('consistentTone', 1, text, morphemes);
-        } else if (uniqueFinalEnds > 1) {
-            addScore('consistentTone', -1, text, morphemes);
-        }
-
-        // 単語の意図的な繰り返しを検出 (人間らしさを加点)
-        const allNouns = morphemes.filter(m => m.pos === '名詞' && m.surface_form.length > 1).map(m => m.surface_form);
-        const nounFrequency = {};
-        allNouns.forEach(noun => { nounFrequency[noun] = (nounFrequency[noun] || 0) + 1; });
-        const repeatedNouns = Object.values(nounFrequency).filter(count => count >= 3);
-        if (repeatedNouns.length > 0 && allNouns.length > 20) {
-            addScore('intentionalRepetition', -1, text, morphemes);
-        }
-    } else {
-        addScore('shortText', 1, text, morphemes);
+    if (!morphemes || morphemes.length === 0) {
+        return null;
     }
 
-    // スコアの最終調整
-    aiScore = Math.max(0, Math.min(100, aiScore));
-    const humanScore = 100 - aiScore;
+    const totalMorphemes = morphemes.length;
+
+    // 1. 語彙の多様度 (Type-Token Ratio)
+    const allWords = morphemes.map(m => m.surface_form);
+    const uniqueWords = new Set(allWords);
+    const ttr = uniqueWords.size / totalMorphemes;
+
+    // 2. 品詞別の出現比率
+    const nounRatio = countMorpheme(morphemes, '名詞') / totalMorphemes;
+    const verbRatio = countMorpheme(morphemes, '動詞') / totalMorphemes;
+    const adjectiveRatio = countMorpheme(morphemes, '形容詞') / totalMorphemes;
+    const particleRatio = countMorpheme(morphemes, '助詞') / totalMorphemes;
+    
+    // 3. 固有名詞の比率 (AIは固有名詞を避ける傾向)
+    const properNounRatio = countSubMorpheme(morphemes, '固有名詞') / totalMorphemes;
+
+    // 4. 文の複雑さ
+    const sentences = text.split(/[。！？]/).filter(s => s.trim().length > 0);
+    const averageSentenceLength = sentences.length > 0 ? text.length / sentences.length : 0;
+    const sentenceLengthStdDev = sentences.length > 1 ?
+        Math.sqrt(sentences.map(s => Math.pow(s.length - averageSentenceLength, 2)).reduce((a, b) => a + b) / sentences.length)
+        : 0;
+    
+    // 5. 接続詞の多様性と頻度
+    const connectors = ["しかし", "したがって", "また", "そして", "さらに"];
+    const complexConnectors = ["その一方で", "具体的には", "鑑みるに"];
+    const connectorCount = countPhrases(text, connectors) + countPhrases(text, complexConnectors);
+    const connectorRatio = connectorCount / totalMorphemes;
+
+    // 6. メタな表現の有無
+    const metaPhrases = ["AIの文章", "この記事では", "本稿では"];
+    const hasMetaPhrase = countPhrases(text, metaPhrases) > 0;
+
+    // 7. リズミカルな反復表現 (スイミーのような文章に特徴的)
+    const rhythmicRepetitions = ["こわかった。 さびしかった。 とてもかなしかった。", "考えた。 うんと考えた。"];
+    const hasRhythmicRepetition = countPhrases(text, rhythmicRepetitions) > 0;
 
     return {
-        aiPercent: aiScore.toFixed(1),
-        humanPercent: humanScore.toFixed(1),
+        ttr: ttr.toFixed(4),
+        nounRatio: nounRatio.toFixed(4),
+        verbRatio: verbRatio.toFixed(4),
+        adjectiveRatio: adjectiveRatio.toFixed(4),
+        properNounRatio: properNounRatio.toFixed(4),
+        averageSentenceLength: averageSentenceLength.toFixed(2),
+        sentenceLengthStdDev: sentenceLengthStdDev.toFixed(2),
+        connectorRatio: connectorRatio.toFixed(4),
+        hasMetaPhrase: hasMetaPhrase,
+        hasRhythmicRepetition: hasRhythmicRepetition
     };
 }
 
-// イベントリスナー
-document.getElementById('analyzeBtn').addEventListener('click', () => {
+
+analyzeBtn.addEventListener('click', async () => {
     const inputText = document.getElementById('inputText').value.trim();
     if (!inputText) {
         alert('文章を入力してください');
@@ -219,8 +138,32 @@ document.getElementById('analyzeBtn').addEventListener('click', () => {
         return;
     }
 
-    const result = analyzeAIStyle(inputText);
-    document.getElementById('aiScore').textContent = result.aiPercent;
-    document.getElementById('humanScore').textContent = result.humanPercent;
-    document.getElementById('result').style.display = 'block';
+    const features = extractFeatures(inputText);
+    if (!features) {
+        resultsDiv.innerHTML = '<p>分析できませんでした。より長い文章を入力してください。</p>';
+        return;
+    }
+
+    // 結果表示
+    resultsDiv.innerHTML = `
+        <h3>AI判定に利用できる特徴量</h3>
+        <p><strong>語彙の多様度 (TTR):</strong> ${features.ttr} <br>
+           ※ 人間は一般的に0.45〜0.65程度</p>
+        <p><strong>名詞比率:</strong> ${features.nounRatio} <br>
+           ※ AIは高くなりがち</p>
+        <p><strong>動詞比率:</strong> ${features.verbRatio} </p>
+        <p><strong>形容詞比率:</strong> ${features.adjectiveRatio} </p>
+        <p><strong>固有名詞比率:</strong> ${features.properNounRatio} <br>
+           ※ AIは低くなりがち</p>
+        <p><strong>平均文長:</strong> ${features.averageSentenceLength} <br>
+           ※ AIは一定の長さに収束しがち</p>
+        <p><strong>文長の標準偏差:</strong> ${features.sentenceLengthStdDev} <br>
+           ※ 人間はばらつきが大きい</p>
+        <p><strong>接続詞比率:</strong> ${features.connectorRatio} </p>
+        <p><strong>メタな表現の有無:</strong> ${features.hasMetaPhrase ? 'あり' : 'なし'} </p>
+        <p><strong>リズミカルな反復表現の有無:</strong> ${features.hasRhythmicRepetition ? 'あり' : 'なし'} </p>
+    `;
+    
+    resultsDiv.style.display = 'block';
 });
+
