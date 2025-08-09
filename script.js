@@ -11,7 +11,6 @@ function animateProgressBar() {
     
     let progress = 0;
     const update = () => {
-        // 95%で一旦止めて、完了を待つ
         if (progress < 95) {
             progress += Math.random() * 2;
             if (progress > 95) progress = 95;
@@ -44,6 +43,7 @@ kuromoji.builder({ dicPath: './dict/' }).build(function (err, _tokenizer) {
     }, 2000);
 });
 
+// ヘルパー関数群
 function countMorpheme(morphemes, partOfSpeech) {
     return morphemes.filter(m => m.pos === partOfSpeech).length;
 }
@@ -70,83 +70,95 @@ function analyzeSentenceEndVariety(text) {
     return uniqueEnds.size;
 }
 
+/**
+ * 日本語の文章を分析し、AIが生成した可能性を判定します。
+ */
 function analyzeAIStyle(text) {
     const length = text.length || 1;
     let aiScore = 50;
     
-    const addScore = (key, value, text) => {
+    // スコア調整を統一的に行うヘルパー関数
+    const addScore = (key, value, text, morphemes = null) => {
         const weights = {
-            'punctuationRate': 20, 'spaceRate': 20, 'connectorCount': 10,
-            'bracketsCount': 3, 'mixedNumber': 8, 'markdownRate': 15,
-            'nounRateAI': 25, 'nounRateHuman': 25, 'particleUsageAI': 30,
-            'complexConnectors': 20, 'idiomCount': 30, 'sentenceEndVariety': 15,
-            'shortText': 15, 'simpleSentenceEnd': 25, 'diverseSentenceEnd': 25,
-            'complexSentenceStructure': 20, 'specializedTerms': 20,
-            'excessivePunctuation': 15, 'balancedConnectors': 15
+            'punctuationRate': 25, 'connectorCount': 15, 'sentenceEndSetSize': 20,
+            'bracketsCount': 10, 'mixedNumber': 15, 'markdownRate': 20,
+            'nounRateAI': 30, 'nounRateHuman': 30, 'particleVariety': 35,
+            'complexConnectors': 25, 'idiomCount': 35, 'sentenceEndVariety': 25,
+            'shortText': 20, 'jargonCount': 30, 'grammaticalErrors': -20
         };
         const weight = weights[key] || 1;
         aiScore += value * weight;
         if (text.length < 50) aiScore += 10;
     };
 
-    // 1. 基本的な文字・記号の分析を強化
-    const punctuationRate = (text.match(/、/g) || []).length / length;
-    const spaceRate = (text.match(/ /g) || []).length / length;
-    const connectors = ["しかし", "だから", "つまり", "そして", "ところで"];
+    // 1. 基本的な文字・記号の分析
+    const punctuationRate = (text.match(/[。、]/g) || []).length / length;
+    const connectors = ["しかし", "したがって", "また", "そして", "さらに"];
     const connectorCount = countPhrases(text, connectors);
-    const bracketsCount = (text.match(/[（）]/g) || []).length;
+    const bracketsCount = (text.match(/[（）「」『』]/g) || []).length;
     const hasKanjiNum = /[一二三四五六七八九十]/.test(text) ? 1 : 0;
     const hasArabicNum = /[0-9]/.test(text) ? 1 : 0;
     const mixedNumber = hasKanjiNum && hasArabicNum ? 1 : 0;
-    const markdownSymbols = /[#*_`>-]/g;
-    const markdownCount = (text.match(markdownSymbols) || []).length;
+    const markdownCount = (text.match(/[#*_`>-]/g) || []).length;
     const markdownRate = markdownCount / length;
 
-    addScore('punctuationRate', punctuationRate > 0.015 ? 1 : -1, text);
-    addScore('spaceRate', spaceRate > 0.01 ? 1 : -1, text);
-    addScore('connectorCount', connectorCount > 0 ? 1 : -1, text);
-    addScore('bracketsCount', bracketsCount > 2 ? 1 : -1, text);
-    addScore('mixedNumber', mixedNumber > 0 ? 1 : -1, text);
-    addScore('markdownRate', markdownRate > 0.01 ? 1 : -1, text);
-    addScore('excessivePunctuation', (text.match(/[！？…]/g) || []).length > 2 ? -1 : 1, text);
+    if (punctuationRate > 0.02) addScore('punctuationRate', 1, text);
+    else if (punctuationRate < 0.005) addScore('punctuationRate', 1, text);
+    else addScore('punctuationRate', -1, text);
+
+    if (connectorCount > 2) addScore('connectorCount', 1, text);
+    else addScore('connectorCount', -1, text);
+
+    if (bracketsCount > 3) addScore('bracketsCount', 1, text);
+    else addScore('bracketsCount', -1, text);
+
+    if (mixedNumber > 0) addScore('mixedNumber', 1, text);
+    else addScore('mixedNumber', -1, text);
+
+    if (markdownRate > 0.01) addScore('markdownRate', 1, text);
+    else addScore('markdownRate', -1, text);
 
     // 2. 形態素解析による高度な分析を強化
     const morphemes = tokenizer.tokenize(text);
     if (morphemes && morphemes.length > 10) {
         const nounRate = countMorpheme(morphemes, '名詞') / morphemes.length;
-        if (nounRate > 0.45) addScore('nounRateAI', 1, text);
-        else if (nounRate < 0.2) addScore('nounRateHuman', 1, text);
-        else addScore('nounRateAI', -1, text);
+        if (nounRate > 0.45) addScore('nounRateAI', 1, text, morphemes);
+        else if (nounRate < 0.2) addScore('nounRateHuman', 1, text, morphemes);
+        else addScore('nounRateAI', -1, text, morphemes);
 
-        const particleUsage = (morphemes.filter(m => m.pos === '助詞' && (m.surface_form === 'について' || m.surface_form === 'によって')).length / morphemes.filter(m => m.pos === '助詞').length) || 0;
-        if (particleUsage > 0.1) addScore('particleUsageAI', 1, text);
-        else addScore('particleUsageAI', -1, text);
+        const particleVariety = new Set(morphemes.filter(m => m.pos === '助詞').map(m => m.surface_form)).size;
+        const totalParticles = countMorpheme(morphemes, '助詞');
+        if (totalParticles > 0 && particleVariety / totalParticles < 0.4) {
+            addScore('particleVariety', 1, text, morphemes);
+        } else {
+            addScore('particleVariety', -1, text, morphemes);
+        }
 
         const idioms = ["猫の手も借りたい", "雨後の筍", "情けは人のためならず", "顔が広い", "喉から手が出る"];
         const idiomCount = countPhrases(text, idioms);
-        addScore('idiomCount', idiomCount > 0 ? -1 : 1, text);
+        addScore('idiomCount', idiomCount > 0 ? -1 : 1, text, morphemes);
 
         const complexConnectors = ["その一方で", "したがって", "具体的には", "一般的に", "鑑みるに", "総じて"];
         const complexConnectorCount = countPhrases(text, complexConnectors);
-        if (complexConnectorCount > 0) addScore('complexConnectors', 1, text);
-        else addScore('complexConnectors', -1, text);
+        if (complexConnectorCount > 0) addScore('complexConnectors', 1, text, morphemes);
+        else addScore('complexConnectors', -1, text, morphemes);
         
-        const simpleConnectors = ["しかし", "そして", "だから"];
-        const simpleConnectorCount = countPhrases(text, simpleConnectors);
-        if (simpleConnectorCount > 0) addScore('balancedConnectors', -1, text);
-        else addScore('balancedConnectors', 1, text);
-
         const sentenceEndVariety = analyzeSentenceEndVariety(text);
-        if (sentenceEndVariety < 3) addScore('simpleSentenceEnd', 1, text);
-        else addScore('diverseSentenceEnd', -1, text);
+        if (sentenceEndVariety < 3) addScore('sentenceEndVariety', 1, text, morphemes);
+        else addScore('sentenceEndVariety', -1, text, morphemes);
 
-        const specializedTerms = ["アルゴリズム", "プロトコル", "パラダイム", "メタデータ", "フレームワーク"];
-        const specializedTermCount = countPhrases(text, specializedTerms);
-        if (specializedTermCount > 0) addScore('specializedTerms', 1, text);
-        else addScore('specializedTerms', -1, text);
+        const jargonList = ["アルゴリズム", "プロトコル", "パラダイム", "メタデータ", "フレームワーク", "イノベーション", "レガシー"];
+        const jargonCount = countPhrases(text, jargonList);
+        if (jargonCount > 0) addScore('jargonCount', 1, text, morphemes);
+        else addScore('jargonCount', -1, text, morphemes);
+
+        // 人間特有の非文法的な表現を検出
+        const casualEnds = ["だよね", "じゃん", "みたいな"];
+        const hasCasualEnd = casualEnds.some(end => text.includes(end));
+        if (hasCasualEnd) aiScore -= 30;
 
     } else {
-        addScore('shortText', 1, text);
+        addScore('shortText', 1, text, morphemes);
     }
 
     // スコアの最終調整
