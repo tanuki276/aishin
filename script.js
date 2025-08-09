@@ -1,4 +1,4 @@
-let tokenizer = null;
+Let tokenizer = null;
 const analyzeBtn = document.getElementById('analyzeBtn');
 const progressContainer = document.getElementById('progress-container');
 const progressBar = document.getElementById('progress-bar');
@@ -88,7 +88,7 @@ function countPhrases(text, phrases) {
     return count;
 }
 
-// 特徴量抽出
+// 【強化】特徴量抽出
 function extractFeatures(text) {
     try {
         const morphemes = tokenizer.tokenize(text);
@@ -104,12 +104,21 @@ function extractFeatures(text) {
         const verbRatio = countMorpheme(morphemes, '動詞') / totalMorphemes;
         const adjectiveRatio = countMorpheme(morphemes, '形容詞') / totalMorphemes;
         const properNounRatio = countSubMorpheme(morphemes, '固有名詞') / totalMorphemes;
+        
+        // 【強化】主観的表現の比率
+        const subjectiveMorphemes = morphemes.filter(m => ['私', '私は', '〜と思う', '〜と感じる', '〜と考える'].some(p => m.surface_form.includes(p)));
+        const subjectiveRatio = subjectiveMorphemes.length / totalMorphemes;
 
         const sentences = text.split(/[。！？]/).filter(s => s.trim().length > 0);
         const averageSentenceLength = sentences.length > 0 ? text.length / sentences.length : 0;
         const sentenceLengthStdDev = sentences.length > 1
             ? Math.sqrt(sentences.map(s => Math.pow(s.length - averageSentenceLength, 2)).reduce((a, b) => a + b, 0) / sentences.length)
             : 0;
+            
+        // 【強化】ChatGPT特有の頻出フレーズ
+        const chatgptPhrases = ['と言えるでしょう', 'の観点から', '包括的に', '多角的に', '〜ということが重要です', '〜に焦点を当てて'];
+        const chatgptPhraseCount = countPhrases(text, chatgptPhrases);
+        const chatgptPhraseRatio = totalMorphemes > 0 ? chatgptPhraseCount / totalMorphemes : 0;
 
         const connectors = ['しかし', 'したがって', 'また', 'そして', 'さらに', 'ゆえに', '一方で', '例えば'];
         const complexConnectors = ['その一方で', '具体的には', '鑑みるに', '加えて', 'その結果'];
@@ -127,9 +136,11 @@ function extractFeatures(text) {
             verbRatio,
             adjectiveRatio,
             properNounRatio,
+            subjectiveRatio, // 【追加】
             averageSentenceLength,
             sentenceLengthStdDev,
             connectorRatio,
+            chatgptPhraseRatio, // 【追加】
             hasMetaPhrase,
             hasRhythmicRepetition
         };
@@ -139,31 +150,36 @@ function extractFeatures(text) {
     }
 }
 
-// AI vs 人間のスコアリング
+// 【強化】AI vs 人間のスコアリング
 function calculateScore(features) {
-    if (!features) return { ai: 50, human: 50 }; // 短文すぎる場合は中立
+    if (!features) return { ai: 50, human: 50 };
 
     let aiScore = 0;
     let humanScore = 0;
 
+    // 基本ロジック（重み調整）
     aiScore += features.ttr < 0.45 ? 20 : 0;
     humanScore += features.ttr >= 0.45 && features.ttr <= 0.65 ? 20 : 0;
-
     aiScore += features.nounRatio > 0.4 ? 15 : 0;
     humanScore += features.nounRatio <= 0.4 ? 15 : 0;
-
     humanScore += features.properNounRatio > 0.05 ? 15 : 0;
     aiScore += features.properNounRatio <= 0.05 ? 15 : 0;
-
     humanScore += features.sentenceLengthStdDev > 10 ? 15 : 0;
     aiScore += features.sentenceLengthStdDev <= 10 ? 15 : 0;
-
     aiScore += features.connectorRatio > 0.03 ? 15 : 0;
     humanScore += features.connectorRatio <= 0.03 ? 15 : 0;
-
     aiScore += features.hasMetaPhrase ? 20 : 0;
     humanScore += !features.hasMetaPhrase ? 20 : 0;
+    humanScore += !features.hasRhythmicRepetition ? 5 : 0; // 反復が少ない場合は人間寄り
 
+    // 【追加】ChatGPT特有の傾向に対するスコアリング
+    aiScore += features.chatgptPhraseRatio > 0.005 ? 30 : 0;
+    humanScore += features.chatgptPhraseRatio === 0 ? 30 : 0;
+
+    aiScore += features.subjectiveRatio < 0.01 ? 25 : 0;
+    humanScore += features.subjectiveRatio >= 0.01 ? 25 : 0;
+
+    // スコアの正規化
     const total = aiScore + humanScore;
     if (total === 0) return { ai: 50, human: 50 };
     return {
@@ -205,9 +221,11 @@ analyzeBtn.addEventListener('click', async () => {
         <p>動詞比率: ${features.verbRatio.toFixed(4)}</p>
         <p>形容詞比率: ${features.adjectiveRatio.toFixed(4)}</p>
         <p>固有名詞比率: ${features.properNounRatio.toFixed(4)} (人間: 高め)</p>
+        <p>主観的表現比率: ${features.subjectiveRatio.toFixed(4)} (人間: 高め) **NEW**</p>
         <p>平均文長: ${features.averageSentenceLength.toFixed(2)}</p>
         <p>文長の標準偏差: ${features.sentenceLengthStdDev.toFixed(2)} (人間: 大きめ)</p>
         <p>接続詞比率: ${features.connectorRatio.toFixed(4)} (AI: 高め)</p>
+        <p>ChatGPT頻出フレーズ比率: ${features.chatgptPhraseRatio.toFixed(4)} (AI: 高め) **NEW**</p>
         <p>メタな表現: ${features.hasMetaPhrase ? 'あり' : 'なし'}</p>
         <p>リズミカルな反復: ${features.hasRhythmicRepetition ? 'あり' : 'なし'}</p>
     `;
