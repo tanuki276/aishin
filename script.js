@@ -85,7 +85,8 @@ function analyzeAIStyle(text) {
             'nounRateAI': 30, 'nounRateHuman': 30, 'particleVariety': 35,
             'complexConnectors': 25, 'idiomCount': 35, 'sentenceEndVariety': 25,
             'shortText': 20, 'jargonCount': 30, 'grammaticalErrors': -20,
-            'storyTellerPhrases': 40, 'moralConclusion': 50, 'consistentTone': 30
+            'storyTellerPhrases': 40, 'moralConclusion': 50, 'consistentTone': 30,
+            'perfectGrammar': 30, 'naturalPause': -20, 'repetitivePhrases': 40
         };
         const weight = weights[key] || 1;
         aiScore += value * weight;
@@ -158,17 +159,17 @@ function analyzeAIStyle(text) {
         const hasCasualEnd = casualEnds.some(end => text.includes(end));
         if (hasCasualEnd) aiScore -= 30;
 
-        // 新しいロジック：物語の定型パターンを検出
+        // 物語の定型パターンを検出 (より高い重み付け)
         const storyTellerPhrases = ["ある日", "その時", "それ以来"];
         const storyTellerPhraseCount = countPhrases(text, storyTellerPhrases);
         if (storyTellerPhraseCount >= 2) addScore('storyTellerPhrases', 1, text, morphemes);
         
-        // 新しいロジック：道徳的な結論を検出
+        // 道徳的な結論を検出 (最も高い重み付け)
         const moralConclusionPhrases = ["心が動いた", "優しさが心を変えた", "大切なことを学んだ", "気づかされた"];
         const moralConclusionCount = countPhrases(text, moralConclusionPhrases);
         if (moralConclusionCount > 0) addScore('moralConclusion', 1, text, morphemes);
 
-        // 新しいロジック：文末表現の揺らぎの少なさ
+        // 文末表現の揺らぎの少なさ
         const sentenceEnds = ["です", "ます", "だ", "である"];
         const finalSentenceEnds = morphemes.filter(m => m.pos === '助動詞' && sentenceEnds.includes(m.surface_form)).map(m => m.surface_form);
         const uniqueFinalEnds = new Set(finalSentenceEnds).size;
@@ -177,6 +178,13 @@ function analyzeAIStyle(text) {
         } else if (uniqueFinalEnds > 1) {
             addScore('consistentTone', -1, text, morphemes);
         }
+        
+        // 繰り返し表現を検出
+        const repeatedNouns = morphemes.filter(m => m.pos === '名詞').map(m => m.surface_form);
+        const nounFrequency = {};
+        repeatedNouns.forEach(noun => { nounFrequency[noun] = (nounFrequency[noun] || 0) + 1; });
+        const repetitive = Object.values(nounFrequency).some(count => count >= 3 && repeatedNouns.length > 20);
+        if(repetitive) addScore('repetitivePhrases', 1, text, morphemes);
 
     } else {
         addScore('shortText', 1, text, morphemes);
