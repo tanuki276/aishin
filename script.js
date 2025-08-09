@@ -23,7 +23,7 @@ function animateProgressBar() {
 }
 
 // kuromoji.jsの初期化 (Promise化してモダンな非同期処理に)
-function initializeTokenizer() {
+async function initializeTokenizer() {
     return new Promise((resolve, reject) => {
         analyzeBtn.textContent = '辞書ダウンロード中...';
         animateProgressBar();
@@ -67,64 +67,79 @@ function countPhrases(text, phrases) {
     return count;
 }
 
-// 新しい特徴量抽出ロジック
+// 特徴量抽出ロジック
 function extractFeatures(text) {
     const morphemes = tokenizer.tokenize(text);
     if (!morphemes || morphemes.length === 0) {
         return null;
     }
-
     const totalMorphemes = morphemes.length;
 
-    // 1. 語彙の多様度 (Type-Token Ratio)
     const allWords = morphemes.map(m => m.surface_form);
     const uniqueWords = new Set(allWords);
     const ttr = uniqueWords.size / totalMorphemes;
-
-    // 2. 品詞別の出現比率
     const nounRatio = countMorpheme(morphemes, '名詞') / totalMorphemes;
     const verbRatio = countMorpheme(morphemes, '動詞') / totalMorphemes;
     const adjectiveRatio = countMorpheme(morphemes, '形容詞') / totalMorphemes;
-    const particleRatio = countMorpheme(morphemes, '助詞') / totalMorphemes;
-    
-    // 3. 固有名詞の比率 (AIは固有名詞を避ける傾向)
     const properNounRatio = countSubMorpheme(morphemes, '固有名詞') / totalMorphemes;
-
-    // 4. 文の複雑さ
     const sentences = text.split(/[。！？]/).filter(s => s.trim().length > 0);
     const averageSentenceLength = sentences.length > 0 ? text.length / sentences.length : 0;
     const sentenceLengthStdDev = sentences.length > 1 ?
         Math.sqrt(sentences.map(s => Math.pow(s.length - averageSentenceLength, 2)).reduce((a, b) => a + b) / sentences.length)
         : 0;
-    
-    // 5. 接続詞の多様性と頻度
     const connectors = ["しかし", "したがって", "また", "そして", "さらに"];
     const complexConnectors = ["その一方で", "具体的には", "鑑みるに"];
     const connectorCount = countPhrases(text, connectors) + countPhrases(text, complexConnectors);
     const connectorRatio = connectorCount / totalMorphemes;
-
-    // 6. メタな表現の有無
     const metaPhrases = ["AIの文章", "この記事では", "本稿では"];
     const hasMetaPhrase = countPhrases(text, metaPhrases) > 0;
-
-    // 7. リズミカルな反復表現 (スイミーのような文章に特徴的)
     const rhythmicRepetitions = ["こわかった。 さびしかった。 とてもかなしかった。", "考えた。 うんと考えた。"];
     const hasRhythmicRepetition = countPhrases(text, rhythmicRepetitions) > 0;
 
     return {
-        ttr: ttr.toFixed(4),
-        nounRatio: nounRatio.toFixed(4),
-        verbRatio: verbRatio.toFixed(4),
-        adjectiveRatio: adjectiveRatio.toFixed(4),
-        properNounRatio: properNounRatio.toFixed(4),
-        averageSentenceLength: averageSentenceLength.toFixed(2),
-        sentenceLengthStdDev: sentenceLengthStdDev.toFixed(2),
-        connectorRatio: connectorRatio.toFixed(4),
-        hasMetaPhrase: hasMetaPhrase,
-        hasRhythmicRepetition: hasRhythmicRepetition
+        ttr, nounRatio, verbRatio, adjectiveRatio, properNounRatio,
+        averageSentenceLength, sentenceLengthStdDev, connectorRatio,
+        hasMetaPhrase, hasRhythmicRepetition
     };
 }
 
+// AI判定ロジック (特徴量に基づいてスコアを算出)
+function analyzeAIStyle(features) {
+    let aiScore = 50; // 基準点を50%に設定
+
+    // TTR: AIは高くなりがち。人間の範囲(0.45〜0.65)から外れると加点
+    if (features.ttr < 0.4 || features.ttr > 0.7) aiScore += 10;
+    else aiScore -= 5;
+
+    // 名詞比率: AIは高くなりがち。
+    if (features.nounRatio > 0.35) aiScore += 10;
+    else if (features.nounRatio < 0.2) aiScore -= 10;
+
+    // 固有名詞比率: AIは低くなりがち。
+    if (features.properNounRatio < 0.001) aiScore += 10;
+    else aiScore -= 5;
+    
+    // 文長の標準偏差: 人間はばらつきが大きい。標準偏差が低いとAIの可能性。
+    if (features.sentenceLengthStdDev < 5) aiScore += 10;
+    else aiScore -= 5;
+
+    // 接続詞比率: AIは論理的な接続詞を使いがち。
+    if (features.connectorRatio > 0.01) aiScore += 10;
+    
+    // メタな表現: AIが人間を装う際に使うことがあるため加点。
+    if (features.hasMetaPhrase) aiScore += 20;
+
+    // リズミカルな反復表現: 人間の作家が使う表現のため減点。
+    if (features.hasRhythmicRepetition) aiScore -= 20;
+
+    aiScore = Math.max(0, Math.min(100, aiScore));
+    const humanScore = 100 - aiScore;
+
+    return {
+        aiPercent: aiScore.toFixed(1),
+        humanPercent: humanScore.toFixed(1),
+    };
+}
 
 analyzeBtn.addEventListener('click', async () => {
     const inputText = document.getElementById('inputText').value.trim();
@@ -144,26 +159,14 @@ analyzeBtn.addEventListener('click', async () => {
         return;
     }
 
-    // 結果表示
+    const result = analyzeAIStyle(features);
+
+    // 結果表示を「AI〇〇%と人間〇〇%」に絞り込む
     resultsDiv.innerHTML = `
-        <h3>AI判定に利用できる特徴量</h3>
-        <p><strong>語彙の多様度 (TTR):</strong> ${features.ttr} <br>
-           ※ 人間は一般的に0.45〜0.65程度</p>
-        <p><strong>名詞比率:</strong> ${features.nounRatio} <br>
-           ※ AIは高くなりがち</p>
-        <p><strong>動詞比率:</strong> ${features.verbRatio} </p>
-        <p><strong>形容詞比率:</strong> ${features.adjectiveRatio} </p>
-        <p><strong>固有名詞比率:</strong> ${features.properNounRatio} <br>
-           ※ AIは低くなりがち</p>
-        <p><strong>平均文長:</strong> ${features.averageSentenceLength} <br>
-           ※ AIは一定の長さに収束しがち</p>
-        <p><strong>文長の標準偏差:</strong> ${features.sentenceLengthStdDev} <br>
-           ※ 人間はばらつきが大きい</p>
-        <p><strong>接続詞比率:</strong> ${features.connectorRatio} </p>
-        <p><strong>メタな表現の有無:</strong> ${features.hasMetaPhrase ? 'あり' : 'なし'} </p>
-        <p><strong>リズミカルな反復表現の有無:</strong> ${features.hasRhythmicRepetition ? 'あり' : 'なし'} </p>
+        <h3>AI判定結果</h3>
+        <p><strong>AI生成度:</strong> ${result.aiPercent}%</p>
+        <p><strong>人間度:</strong> ${result.humanPercent}%</p>
     `;
     
     resultsDiv.style.display = 'block';
 });
-
