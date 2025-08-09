@@ -1,33 +1,28 @@
-// kuromoji.jsの初期化を一度だけ実行
 let tokenizer = null;
 const analyzeBtn = document.getElementById('analyzeBtn');
 const progressContainer = document.getElementById('progress-container');
 const progressBar = document.getElementById('progress-bar');
 const progressText = document.getElementById('progress-text');
 
-// 読み込み中のプログレスバーをアニメーションさせる関数
 function animateProgressBar() {
     progressContainer.style.display = 'block';
-
     let progress = 0;
     const update = () => {
-        // 95%で一旦止めて、完了を待つ
         if (progress < 95) {
-            progress += Math.random() * 2; // 0から2の間でランダムに増加
+            progress += Math.random() * 2;
             if (progress > 95) progress = 95;
             progressBar.style.width = `${progress}%`;
             progressText.textContent = `ライブラリをダウンロードしています... ${Math.floor(progress)}%`;
-            requestAnimationFrame(update); // 次のフレームで再実行
+            requestAnimationFrame(update);
         }
     };
     requestAnimationFrame(update);
 }
 
-// kuromoji.jsの初期化
 analyzeBtn.textContent = '辞書ダウンロード中...';
 animateProgressBar();
 
-kuromoji.builder({ dicPath: 'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/' }).build(function (err, _tokenizer) {
+kuromoji.builder({ dicPath: './dict/' }).build(function (err, _tokenizer) {
     if (err) {
         console.error('ライブラリの初期化に失敗しました:', err);
         analyzeBtn.textContent = '初期化失敗';
@@ -44,12 +39,10 @@ kuromoji.builder({ dicPath: 'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/' 
     }, 2000);
 });
 
-// 形態素をカウントするヘルパー関数
 function countMorpheme(morphemes, partOfSpeech) {
     return morphemes.filter(m => m.pos === partOfSpeech).length;
 }
 
-// 特定のフレーズをカウントするヘルパー関数
 function countPhrases(text, phrases) {
     let count = 0;
     phrases.forEach(phrase => {
@@ -59,7 +52,6 @@ function countPhrases(text, phrases) {
     return count;
 }
 
-// 文末表現の多様性を分析するヘルパー関数
 function analyzeSentenceEndVariety(text) {
     const sentences = text.split(/[。！？]/);
     const uniqueEnds = new Set();
@@ -73,14 +65,9 @@ function analyzeSentenceEndVariety(text) {
     return uniqueEnds.size;
 }
 
-/**
- * 日本語の文章を分析し、AIが生成した可能性を判定します。
- */
 function analyzeAIStyle(text) {
     const length = text.length || 1;
     let aiScore = 50;
-
-    // スコア調整を統一的に行うヘルパー関数
     const addScore = (key, value, text) => {
         const weights = {
             'punctuationRate': 20, 'spaceRate': 20, 'connectorCount': 10, 'sentenceEndSetSize': 5,
@@ -94,7 +81,6 @@ function analyzeAIStyle(text) {
         if (text.length < 50) aiScore += 10;
     };
 
-    // 1. 基本的な文字・記号の分析
     const punctuationRate = (text.match(/、/g) || []).length / length;
     const spaceRate = (text.match(/ /g) || []).length / length;
     const connectors = ["しかし", "だから", "つまり", "そして", "ところで"];
@@ -117,7 +103,6 @@ function analyzeAIStyle(text) {
     addScore('mixedNumber', mixedNumber > 0 ? 1 : -1, text);
     addScore('markdownRate', markdownRate > 0.01 ? 1 : -1, text);
 
-    // 2. 形態素解析による高度な分析
     const morphemes = tokenizer.tokenize(text);
     if (morphemes && morphemes.length > 10) {
         const nounRate = countMorpheme(morphemes, '名詞') / morphemes.length;
@@ -144,7 +129,6 @@ function analyzeAIStyle(text) {
         addScore('shortText', 1, text);
     }
 
-    // スコアの最終調整
     aiScore = Math.max(0, Math.min(100, aiScore));
     const humanScore = 100 - aiScore;
 
@@ -153,22 +137,3 @@ function analyzeAIStyle(text) {
         humanPercent: humanScore.toFixed(1),
     };
 }
-
-// イベントリスナーの修正
-document.getElementById('analyzeBtn').addEventListener('click', () => {
-    const inputText = document.getElementById('inputText').value.trim();
-    if (!inputText) {
-        alert('文章を入力してください');
-        return;
-    }
-
-    if (!tokenizer) {
-        alert('形態素解析がまだ準備できていません。しばらくお待ちください。');
-        return;
-    }
-
-    const result = analyzeAIStyle(inputText);
-    document.getElementById('aiScore').textContent = result.aiPercent;
-    document.getElementById('humanScore').textContent = result.humanPercent;
-    document.getElementById('result').style.display = 'block';
-});
