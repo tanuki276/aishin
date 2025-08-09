@@ -86,7 +86,8 @@ function analyzeAIStyle(text) {
             'complexConnectors': 25, 'idiomCount': 35, 'sentenceEndVariety': 25,
             'shortText': 20, 'jargonCount': 30, 'grammaticalErrors': -20,
             'storyTellerPhrases': 40, 'moralConclusion': 50, 'consistentTone': 30,
-            'perfectGrammar': 30, 'naturalPause': -20, 'repetitivePhrases': 40
+            'perfectGrammar': 30, 'naturalPause': -20, 'repetitivePhrases': 40,
+            'intentionalRepetition': -30, 'adverbVariety': -25
         };
         const weight = weights[key] || 1;
         aiScore += value * weight;
@@ -136,6 +137,14 @@ function analyzeAIStyle(text) {
             addScore('particleVariety', -1, text, morphemes);
         }
 
+        const adverbs = morphemes.filter(m => m.pos === '副詞').map(m => m.surface_form);
+        const uniqueAdverbs = new Set(adverbs).size;
+        if (adverbs.length > 5 && uniqueAdverbs / adverbs.length < 0.5) {
+             addScore('adverbVariety', 1, text, morphemes);
+        } else {
+             addScore('adverbVariety', -1, text, morphemes);
+        }
+
         const idioms = ["猫の手も借りたい", "雨後の筍", "情けは人のためならず", "顔が広い", "喉から手が出る"];
         const idiomCount = countPhrases(text, idioms);
         addScore('idiomCount', idiomCount > 0 ? -1 : 1, text, morphemes);
@@ -154,22 +163,18 @@ function analyzeAIStyle(text) {
         if (jargonCount > 0) addScore('jargonCount', 1, text, morphemes);
         else addScore('jargonCount', -1, text, morphemes);
 
-        // 人間特有の非文法的な表現を検出
         const casualEnds = ["だよね", "じゃん", "みたいな"];
         const hasCasualEnd = casualEnds.some(end => text.includes(end));
         if (hasCasualEnd) aiScore -= 30;
 
-        // 物語の定型パターンを検出 (より高い重み付け)
-        const storyTellerPhrases = ["ある日", "その時", "それ以来"];
+        const storyTellerPhrases = ["ある日", "その時", "それ以来", "あるところに"];
         const storyTellerPhraseCount = countPhrases(text, storyTellerPhrases);
         if (storyTellerPhraseCount >= 2) addScore('storyTellerPhrases', 1, text, morphemes);
         
-        // 道徳的な結論を検出 (最も高い重み付け)
-        const moralConclusionPhrases = ["心が動いた", "優しさが心を変えた", "大切なことを学んだ", "気づかされた"];
+        const moralConclusionPhrases = ["心が動いた", "優しさが心を変えた", "大切なことを学んだ", "気づかされた", "皆が幸せに暮らしましたとさ"];
         const moralConclusionCount = countPhrases(text, moralConclusionPhrases);
         if (moralConclusionCount > 0) addScore('moralConclusion', 1, text, morphemes);
 
-        // 文末表現の揺らぎの少なさ
         const sentenceEnds = ["です", "ます", "だ", "である"];
         const finalSentenceEnds = morphemes.filter(m => m.pos === '助動詞' && sentenceEnds.includes(m.surface_form)).map(m => m.surface_form);
         const uniqueFinalEnds = new Set(finalSentenceEnds).size;
@@ -178,14 +183,15 @@ function analyzeAIStyle(text) {
         } else if (uniqueFinalEnds > 1) {
             addScore('consistentTone', -1, text, morphemes);
         }
-        
-        // 繰り返し表現を検出
-        const repeatedNouns = morphemes.filter(m => m.pos === '名詞').map(m => m.surface_form);
-        const nounFrequency = {};
-        repeatedNouns.forEach(noun => { nounFrequency[noun] = (nounFrequency[noun] || 0) + 1; });
-        const repetitive = Object.values(nounFrequency).some(count => count >= 3 && repeatedNouns.length > 20);
-        if(repetitive) addScore('repetitivePhrases', 1, text, morphemes);
 
+        // 単語の意図的な繰り返しを検出 (人間らしさを加点)
+        const allNouns = morphemes.filter(m => m.pos === '名詞' && m.surface_form.length > 1).map(m => m.surface_form);
+        const nounFrequency = {};
+        allNouns.forEach(noun => { nounFrequency[noun] = (nounFrequency[noun] || 0) + 1; });
+        const repeatedNouns = Object.values(nounFrequency).filter(count => count >= 3);
+        if (repeatedNouns.length > 0 && allNouns.length > 20) {
+            addScore('intentionalRepetition', -1, text, morphemes);
+        }
     } else {
         addScore('shortText', 1, text, morphemes);
     }
