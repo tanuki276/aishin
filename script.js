@@ -84,7 +84,8 @@ function analyzeAIStyle(text) {
             'bracketsCount': 10, 'mixedNumber': 15, 'markdownRate': 20,
             'nounRateAI': 30, 'nounRateHuman': 30, 'particleVariety': 35,
             'complexConnectors': 25, 'idiomCount': 35, 'sentenceEndVariety': 25,
-            'shortText': 20, 'jargonCount': 30, 'grammaticalErrors': -20
+            'shortText': 20, 'jargonCount': 30, 'grammaticalErrors': -20,
+            'storyTellerPhrases': 40, 'moralConclusion': 50, 'consistentTone': 30
         };
         const weight = weights[key] || 1;
         aiScore += value * weight;
@@ -156,6 +157,26 @@ function analyzeAIStyle(text) {
         const casualEnds = ["だよね", "じゃん", "みたいな"];
         const hasCasualEnd = casualEnds.some(end => text.includes(end));
         if (hasCasualEnd) aiScore -= 30;
+
+        // 新しいロジック：物語の定型パターンを検出
+        const storyTellerPhrases = ["ある日", "その時", "それ以来"];
+        const storyTellerPhraseCount = countPhrases(text, storyTellerPhrases);
+        if (storyTellerPhraseCount >= 2) addScore('storyTellerPhrases', 1, text, morphemes);
+        
+        // 新しいロジック：道徳的な結論を検出
+        const moralConclusionPhrases = ["心が動いた", "優しさが心を変えた", "大切なことを学んだ", "気づかされた"];
+        const moralConclusionCount = countPhrases(text, moralConclusionPhrases);
+        if (moralConclusionCount > 0) addScore('moralConclusion', 1, text, morphemes);
+
+        // 新しいロジック：文末表現の揺らぎの少なさ
+        const sentenceEnds = ["です", "ます", "だ", "である"];
+        const finalSentenceEnds = morphemes.filter(m => m.pos === '助動詞' && sentenceEnds.includes(m.surface_form)).map(m => m.surface_form);
+        const uniqueFinalEnds = new Set(finalSentenceEnds).size;
+        if (finalSentenceEnds.length > 3 && uniqueFinalEnds === 1) {
+            addScore('consistentTone', 1, text, morphemes);
+        } else if (uniqueFinalEnds > 1) {
+            addScore('consistentTone', -1, text, morphemes);
+        }
 
     } else {
         addScore('shortText', 1, text, morphemes);
