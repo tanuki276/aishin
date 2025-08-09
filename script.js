@@ -93,7 +93,7 @@ function extractFeatures(text) {
     try {
         const morphemes = tokenizer.tokenize(text);
         if (!morphemes || morphemes.length < 3) {
-            return null; // 短すぎる場合はnull
+            return null;
         }
         const totalMorphemes = morphemes.length;
 
@@ -104,8 +104,7 @@ function extractFeatures(text) {
         const verbRatio = countMorpheme(morphemes, '動詞') / totalMorphemes;
         const adjectiveRatio = countMorpheme(morphemes, '形容詞') / totalMorphemes;
         const properNounRatio = countSubMorpheme(morphemes, '固有名詞') / totalMorphemes;
-        
-        // 【強化】主観的表現の比率
+
         const subjectiveMorphemes = morphemes.filter(m => ['私', '私は', '〜と思う', '〜と感じる', '〜と考える'].some(p => m.surface_form.includes(p)));
         const subjectiveRatio = subjectiveMorphemes.length / totalMorphemes;
 
@@ -114,11 +113,15 @@ function extractFeatures(text) {
         const sentenceLengthStdDev = sentences.length > 1
             ? Math.sqrt(sentences.map(s => Math.pow(s.length - averageSentenceLength, 2)).reduce((a, b) => a + b, 0) / sentences.length)
             : 0;
-            
-        // 【強化】ChatGPT特有の頻出フレーズ
+
         const chatgptPhrases = ['と言えるでしょう', 'の観点から', '包括的に', '多角的に', '〜ということが重要です', '〜に焦点を当てて'];
         const chatgptPhraseCount = countPhrases(text, chatgptPhrases);
         const chatgptPhraseRatio = totalMorphemes > 0 ? chatgptPhraseCount / totalMorphemes : 0;
+
+        // 【追加】肯定的な表現の検出
+        const affirmativePhrases = ['〜と考えられます', '〜が期待されます', '〜が可能です', '〜は非常に有効です'];
+        const affirmativeCount = countPhrases(text, affirmativePhrases);
+        const affirmativeRatio = totalMorphemes > 0 ? affirmativeCount / totalMorphemes : 0;
 
         const connectors = ['しかし', 'したがって', 'また', 'そして', 'さらに', 'ゆえに', '一方で', '例えば'];
         const complexConnectors = ['その一方で', '具体的には', '鑑みるに', '加えて', 'その結果'];
@@ -136,11 +139,12 @@ function extractFeatures(text) {
             verbRatio,
             adjectiveRatio,
             properNounRatio,
-            subjectiveRatio, // 【追加】
+            subjectiveRatio,
             averageSentenceLength,
             sentenceLengthStdDev,
             connectorRatio,
-            chatgptPhraseRatio, // 【追加】
+            chatgptPhraseRatio,
+            affirmativeRatio, // 【追加】
             hasMetaPhrase,
             hasRhythmicRepetition
         };
@@ -170,14 +174,18 @@ function calculateScore(features) {
     humanScore += features.connectorRatio <= 0.03 ? 15 : 0;
     aiScore += features.hasMetaPhrase ? 20 : 0;
     humanScore += !features.hasMetaPhrase ? 20 : 0;
-    humanScore += !features.hasRhythmicRepetition ? 5 : 0; // 反復が少ない場合は人間寄り
+    humanScore += !features.hasRhythmicRepetition ? 5 : 0;
 
-    // 【追加】ChatGPT特有の傾向に対するスコアリング
+    // ChatGPT特有の傾向に対するスコアリング
     aiScore += features.chatgptPhraseRatio > 0.005 ? 30 : 0;
     humanScore += features.chatgptPhraseRatio === 0 ? 30 : 0;
 
     aiScore += features.subjectiveRatio < 0.01 ? 25 : 0;
     humanScore += features.subjectiveRatio >= 0.01 ? 25 : 0;
+
+    // 【追加】肯定度が高い表現に対するスコアリング
+    aiScore += features.affirmativeRatio > 0.01 ? 40 : 0;
+    humanScore += features.affirmativeRatio === 0 ? 40 : 0;
 
     // スコアの正規化
     const total = aiScore + humanScore;
@@ -226,6 +234,7 @@ analyzeBtn.addEventListener('click', async () => {
         <p>文長の標準偏差: ${features.sentenceLengthStdDev.toFixed(2)} (人間: 大きめ)</p>
         <p>接続詞比率: ${features.connectorRatio.toFixed(4)} (AI: 高め)</p>
         <p>ChatGPT頻出フレーズ比率: ${features.chatgptPhraseRatio.toFixed(4)} (AI: 高め) **NEW**</p>
+        <p>肯定度が高い表現比率: ${features.affirmativeRatio.toFixed(4)} (AI: 高め) **NEW**</p>
         <p>メタな表現: ${features.hasMetaPhrase ? 'あり' : 'なし'}</p>
         <p>リズミカルな反復: ${features.hasRhythmicRepetition ? 'あり' : 'なし'}</p>
     `;
