@@ -5,46 +5,68 @@ const progressBar = document.getElementById('progress-bar');
 const progressText = document.getElementById('progress-text');
 const resultsDiv = document.getElementById('result');
 const inputText = document.getElementById('inputText');
-let chartInstance = null;
+const aiScore = document.getElementById('aiScore');
+const humanScore = document.getElementById('humanScore');
 
-// プログレスバーアニメーション
+// プログレスバー（擬似進行）
 function animateProgressBar() {
     progressContainer.style.display = 'block';
     let progress = 0;
     const update = () => {
         if (progress < 95) {
-            progress += Math.random() * 5;
+            progress += Math.random() * 10;
             if (progress > 95) progress = 95;
             progressBar.style.width = `${progress}%`;
-            progressText.textContent = `ライブラリをダウンロードしています... ${Math.floor(progress)}%`;
+            progressText.textContent = `${Math.floor(progress)}%`;
             requestAnimationFrame(update);
         }
     };
     requestAnimationFrame(update);
 }
 
-// Kuromoji初期化
-function initializeTokenizer() {
+// Kuromoji初期化（リトライ付き）
+function initializeTokenizer(retryCount = 0, maxRetries = 3) {
     return new Promise((resolve, reject) => {
-        analyzeBtn.textContent = '辞書ダウンロード中...';
+        analyzeBtn.textContent = `準備中... (試行${retryCount + 1}/${maxRetries})`;
         analyzeBtn.disabled = true;
         animateProgressBar();
-        kuromoji.builder({ dicPath: 'https://unpkg.com/kuromoji@0.1.2/dict/' }).build((err, _tokenizer) => {
-            if (err) {
-                progressContainer.style.display = 'none';
-                analyzeBtn.textContent = '初期化失敗';
-                resultsDiv.innerHTML = `<p class="error">エラー: 辞書ファイルの読み込みに失敗しました。ネットワークを確認してください。</p>`;
-                reject(err);
-                return;
-            }
-            tokenizer = _tokenizer;
-            progressBar.style.width = '100%';
-            progressText.textContent = '準備完了！';
-            analyzeBtn.textContent = '判定する';
-            analyzeBtn.disabled = false;
-            setTimeout(() => progressContainer.style.display = 'none', 1000);
-            resolve();
-        });
+        const dicPath = './dict/'; // ローカル辞書パス
+        try {
+            kuromoji.builder({ dicPath }).build((err, _tokenizer) => {
+                if (err) {
+                    progressContainer.style.display = 'none';
+                    if (retryCount < maxRetries - 1) {
+                        console.warn(`初期化失敗、リトライ ${retryCount + 2}/${maxRetries}:`, err);
+                        setTimeout(() => initializeTokenizer(retryCount + 1, maxRetries).then(resolve).catch(reject), 1000);
+                        return;
+                    }
+                    analyzeBtn.textContent = '初期化失敗';
+                    let errorMsg = 'エラー: 辞書ファイルの読み込みに失敗しました。';
+                    if (err.message.includes('not found')) errorMsg += ' ./dict/フォルダ内のファイルを確認してください。';
+                    else if (err.message.includes('CORS')) errorMsg += ' CORSエラー。ローカルサーバー（例: python -m http.server）で実行してください。';
+                    else errorMsg += ` 詳細: ${err.message}`;
+                    resultsDiv.innerHTML = `<p class="error">${errorMsg}</p>`;
+                    resultsDiv.style.display = 'block';
+                    console.error('Kuromojiエラー:', err);
+                    reject(err);
+                    return;
+                }
+                tokenizer = _tokenizer;
+                progressBar.style.width = '100%';
+                progressText.textContent = '100%';
+                analyzeBtn.textContent = '分析する';
+                analyzeBtn.disabled = false;
+                setTimeout(() => progressContainer.style.display = 'none', 1000);
+                resolve();
+            });
+        } catch (err) {
+            progressContainer.style.display = 'none';
+            analyzeBtn.textContent = '初期化失敗';
+            resultsDiv.innerHTML = `<p class="error">エラー: Kuromojiの初期化に失敗しました。CDN（kuromoji.js）または./dict/を確認してください。詳細: ${err.message}</p>`;
+            resultsDiv.style.display = 'block';
+            console.error('Kuromoji初期化エラー:', err);
+            reject(err);
+        }
     });
 }
 
@@ -68,54 +90,53 @@ function countPhrases(text, phrases) {
 
 // 特徴量抽出
 function extractFeatures(text) {
-    const morphemes = tokenizer.tokenize(text);
-    if (!morphemes || morphemes.length < 3) {
-        return null; // 短すぎる場合はnull
+    try {
+        const morphemes = tokenizer.tokenize(text);
+        if (!morphemes || morphemes.length < 3) {
+            return null; // 短すぎる場合はnull
+        }
+        const totalMorphemes = morphemes.length;
+
+        const uniqueWords = new Set(morphemes.map(m => m.surface_form));
+        const ttr = uniqueWords.size / totalMorphemes;
+
+        const nounRatio = countMorpheme(morphemes, '名詞') / totalMorphemes;
+        const verbRatio = countMorpheme(morphemes, '動詞') / totalMorphemes;
+        const adjectiveRatio = countMorpheme(morphemes, '形容詞') / totalMorphemes;
+        const properNounRatio = countSubMorpheme(morphemes, '固有名詞') / totalMorphemes;
+
+        const sentences = text.split(/[。！？]/).filter(s => s.trim().length > 0);
+        const averageSentenceLength = sentences.length > 0 ? text.length / sentences.length : 0;
+        const sentenceLengthStdDev = sentences.length > 1
+            ? Math.sqrt(sentences.map(s => Math.pow(s.length - averageSentenceLength, 2)).reduce((a, b) => a + b, 0) / sentences.length)
+            : 0;
+
+        const connectors = ['しかし', 'したがって', 'また', 'そして', 'さらに', 'ゆえに', '一方で', '例えば'];
+        const complexConnectors = ['その一方で', '具体的には', '鑑みるに', '加えて', 'その結果'];
+        const connectorCount = countPhrases(text, [...connectors, ...complexConnectors]);
+        const connectorRatio = totalMorphemes > 0 ? connectorCount / totalMorphemes : 0;
+
+        const metaPhrases = ['AIの文章', 'この記事では', '本稿では', '以下に説明する', '我々は'];
+        const rhythmicRepetitions = ['とても.*とても', '考えた。.*考えた。', '美しい.*美しい'];
+        const hasMetaPhrase = countPhrases(text, metaPhrases) > 0;
+        const hasRhythmicRepetition = countPhrases(text, rhythmicRepetitions) > 0;
+
+        return {
+            ttr,
+            nounRatio,
+            verbRatio,
+            adjectiveRatio,
+            properNounRatio,
+            averageSentenceLength,
+            sentenceLengthStdDev,
+            connectorRatio,
+            hasMetaPhrase,
+            hasRhythmicRepetition
+        };
+    } catch (err) {
+        console.error('特徴量抽出エラー:', err);
+        return null;
     }
-    const totalMorphemes = morphemes.length;
-
-    // 語彙の多様度 (TTR)
-    const uniqueWords = new Set(morphemes.map(m => m.surface_form));
-    const ttr = uniqueWords.size / totalMorphemes;
-
-    // 品詞比率
-    const nounRatio = countMorpheme(morphemes, '名詞') / totalMorphemes;
-    const verbRatio = countMorpheme(morphemes, '動詞') / totalMorphemes;
-    const adjectiveRatio = countMorpheme(morphemes, '形容詞') / totalMorphemes;
-    const particleRatio = countMorpheme(morphemes, '助詞') / totalMorphemes;
-    const properNounRatio = countSubMorpheme(morphemes, '固有名詞') / totalMorphemes;
-
-    // 文の複雑さ
-    const sentences = text.split(/[。！？]/).filter(s => s.trim().length > 0);
-    const averageSentenceLength = sentences.length > 0 ? text.length / sentences.length : 0;
-    const sentenceLengthStdDev = sentences.length > 1
-        ? Math.sqrt(sentences.map(s => Math.pow(s.length - averageSentenceLength, 2)).reduce((a, b) => a + b, 0) / sentences.length)
-        : 0;
-
-    // 接続詞
-    const connectors = ['しかし', 'したがって', 'また', 'そして', 'さらに', 'ゆえに', '一方で'];
-    const complexConnectors = ['その一方で', '具体的には', '鑑みるに', '加えて'];
-    const connectorCount = countPhrases(text, [...connectors, ...complexConnectors]);
-    const connectorRatio = totalMorphemes > 0 ? connectorCount / totalMorphemes : 0;
-
-    // メタ表現とリズミカルな表現
-    const metaPhrases = ['AIの文章', 'この記事では', '本稿では', '以下に説明する'];
-    const rhythmicRepetitions = ['とても.*とても', '考えた。.*考えた。'];
-    const hasMetaPhrase = countPhrases(text, metaPhrases) > 0;
-    const hasRhythmicRepetition = countPhrases(text, rhythmicRepetitions) > 0;
-
-    return {
-        ttr,
-        nounRatio,
-        verbRatio,
-        adjectiveRatio,
-        properNounRatio,
-        averageSentenceLength,
-        sentenceLengthStdDev,
-        connectorRatio,
-        hasMetaPhrase,
-        hasRhythmicRepetition
-    };
 }
 
 // AI vs 人間のスコアリング
@@ -125,60 +146,30 @@ function calculateScore(features) {
     let aiScore = 0;
     let humanScore = 0;
 
-    // TTR: 人間は0.45〜0.65、AIは低め
     aiScore += features.ttr < 0.45 ? 20 : 0;
     humanScore += features.ttr >= 0.45 && features.ttr <= 0.65 ? 20 : 0;
 
-    // 名詞比率: AIは高め
     aiScore += features.nounRatio > 0.4 ? 15 : 0;
     humanScore += features.nounRatio <= 0.4 ? 15 : 0;
 
-    // 固有名詞: 人間は多め
     humanScore += features.properNounRatio > 0.05 ? 15 : 0;
     aiScore += features.properNounRatio <= 0.05 ? 15 : 0;
 
-    // 文長のばらつき: 人間は大きめ
     humanScore += features.sentenceLengthStdDev > 10 ? 15 : 0;
     aiScore += features.sentenceLengthStdDev <= 10 ? 15 : 0;
 
-    // 接続詞: AIは高め
     aiScore += features.connectorRatio > 0.03 ? 15 : 0;
     humanScore += features.connectorRatio <= 0.03 ? 15 : 0;
 
-    // メタ表現: AIに多い
     aiScore += features.hasMetaPhrase ? 20 : 0;
     humanScore += !features.hasMetaPhrase ? 20 : 0;
 
-    // 合計を正規化してパーセンテージに
     const total = aiScore + humanScore;
-    if (total === 0) return { ai: 50, human: 50 }; // 極端な場合の中立
+    if (total === 0) return { ai: 50, human: 50 };
     return {
         ai: Math.round((aiScore / total) * 100),
         human: Math.round((humanScore / total) * 100)
     };
-}
-
-// グラフ描画
-function renderChart(scores) {
-    if (chartInstance) chartInstance.destroy();
-    const ctx = document.getElementById('resultChart').getContext('2d');
-    chartInstance = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: ['AI生成', '人間'],
-            datasets: [{
-                label: '確率 (%)',
-                data: [scores.ai, scores.human],
-                backgroundColor: ['#ff6384', '#36a2eb'],
-                borderColor: ['#ff6384', '#36a2eb'],
-                borderWidth: 1
-            }]
-        },
-        options: {
-            scales: { y: { beginAtZero: true, max: 100 } },
-            plugins: { legend: { display: false } }
-        }
-    });
 }
 
 // 分析実行
@@ -186,56 +177,45 @@ analyzeBtn.addEventListener('click', async () => {
     const text = inputText.value.trim();
     if (!text) {
         resultsDiv.innerHTML = '<p class="error">文章を入力してください。</p>';
+        resultsDiv.style.display = 'block';
         return;
     }
     if (!tokenizer) {
-        resultsDiv.innerHTML = '<p class="error">形態素解析が準備できていません。しばらくお待ちください。</p>';
+        resultsDiv.innerHTML = '<p class="error">形態素解析が準備できていません。ページをリロードしてください。</p>';
+        resultsDiv.style.display = 'block';
         return;
     }
 
-    // Web Workerで重い処理をオフロード
-    const worker = new Worker(URL.createObjectURL(new Blob([`
-        ${extractFeatures.toString()}
-        ${countMorpheme.toString()}
-        ${countSubMorpheme.toString()}
-        ${countPhrases.toString()}
-        self.onmessage = (e) => {
-            const features = extractFeatures(e.data.text);
-            self.postMessage(features);
-        };
-    `], { type: 'text/javascript' })));
-
-    worker.postMessage({ text, tokenizer });
-    worker.onmessage = (e) => {
-        const features = e.data;
-        if (!features) {
-            resultsDiv.innerHTML = '<p class="error">文章が短すぎます。もう少し長い文章を入力してください。</p>';
-            worker.terminate();
-            return;
-        }
-
-        const scores = calculateScore(features);
-        resultsDiv.innerHTML = `
-            <h3>判定結果</h3>
-            <p><strong>AI生成:</strong> ${scores.ai}%</p>
-            <p><strong>人間:</strong> ${scores.human}%</p>
-            <h4>特徴量</h4>
-            <p>語彙の多様度 (TTR): ${features.ttr.toFixed(4)} (人間: 0.45〜0.65)</p>
-            <p>名詞比率: ${features.nounRatio.toFixed(4)} (AI: 高め)</p>
-            <p>動詞比率: ${features.verbRatio.toFixed(4)}</p>
-            <p>形容詞比率: ${features.adjectiveRatio.toFixed(4)}</p>
-            <p>固有名詞比率: ${features.properNounRatio.toFixed(4)} (人間: 高め)</p>
-            <p>平均文長: ${features.averageSentenceLength.toFixed(2)}</p>
-            <p>文長の標準偏差: ${features.sentenceLengthStdDev.toFixed(2)} (人間: 大きめ)</p>
-            <p>接続詞比率: ${features.connectorRatio.toFixed(4)} (AI: 高め)</p>
-            <p>メタな表現: ${features.hasMetaPhrase ? 'あり' : 'なし'}</p>
-            <p>リズミカルな反復: ${features.hasRhythmicRepetition ? 'あり' : 'なし'}</p>
-        `;
+    const features = extractFeatures(text);
+    if (!features) {
+        resultsDiv.innerHTML = '<p class="error">文章が短すぎます。もう少し長い文章を入力してください。</p>';
         resultsDiv.style.display = 'block';
-        renderChart(scores);
-        worker.terminate();
-    };
+        return;
+    }
+
+    const scores = calculateScore(features);
+    aiScore.textContent = scores.ai;
+    humanScore.textContent = scores.human;
+    resultsDiv.innerHTML = `
+        <p>AI生成度：<span class="score ai">${scores.ai}</span>%</p>
+        <p>人間度：<span class="score human">${scores.human}</span>%</p>
+        <h4>特徴量</h4>
+        <p>語彙の多様度 (TTR): ${features.ttr.toFixed(4)} (人間: 0.45〜0.65)</p>
+        <p>名詞比率: ${features.nounRatio.toFixed(4)} (AI: 高め)</p>
+        <p>動詞比率: ${features.verbRatio.toFixed(4)}</p>
+        <p>形容詞比率: ${features.adjectiveRatio.toFixed(4)}</p>
+        <p>固有名詞比率: ${features.properNounRatio.toFixed(4)} (人間: 高め)</p>
+        <p>平均文長: ${features.averageSentenceLength.toFixed(2)}</p>
+        <p>文長の標準偏差: ${features.sentenceLengthStdDev.toFixed(2)} (人間: 大きめ)</p>
+        <p>接続詞比率: ${features.connectorRatio.toFixed(4)} (AI: 高め)</p>
+        <p>メタな表現: ${features.hasMetaPhrase ? 'あり' : 'なし'}</p>
+        <p>リズミカルな反復: ${features.hasRhythmicRepetition ? 'あり' : 'なし'}</p>
+    `;
+    resultsDiv.style.display = 'block';
 });
 
-// 初期化実行
-initializeTokenizer();
+// 初期化実行（3回リトライ）
+initializeTokenizer().catch(() => {
+    resultsDiv.innerHTML = '<p class="error">初期化に失敗しました。./dict/フォルダとネットワークを確認し、ページをリロードしてください。</p>';
+    resultsDiv.style.display = 'block';
+});
