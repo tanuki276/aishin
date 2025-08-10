@@ -14,7 +14,7 @@ const kuromoji = require('kuromoji');
 let tokenizer = null;
 let initTokenizer = (async () => {
   try {
-    const dictPath = path.join(__dirname, 'dict');
+    const dictPath = path.join(process.cwd(), 'api', 'dict');
     if (!fs.existsSync(dictPath)) {
       console.warn('Warning: kuromoji dict folder not found at', dictPath);
     }
@@ -115,8 +115,6 @@ async function searchWikipediaBestMatch(keyword) {
     const opJson = await opRes.json();
     const titles = (opJson && opJson[1]) ? opJson[1] : [];
 
-    const candidates = titles.length ? titles : [keyword];
-
     for (const title of candidates) {
       const extractUrl = `https://ja.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&format=json&origin=*&titles=${encodeURIComponent(title)}`;
       const exRes = await fetchImpl(extractUrl);
@@ -167,7 +165,6 @@ function getFallbackResponse() {
 
 async function getBotResponse(userId, userMessage) {
   try {
-    // トークナイザーの初期化が完了するのを待つ
     await initTokenizer;
   } catch (err) {
     console.error('Tokenizer init failed in getBotResponse:', err);
