@@ -256,10 +256,18 @@ const handler = async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+ if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
-  try {
-    const { userId, message } = req.body || {};
-    if (!userId || !message) {
-      return res.status(400).json({ error: 'userId and message are required' });
-    }
+try {
+  const { userId, message } = req.body || {};
+  if (!userId || !message) {
+    return res.status(400).json({ error: 'userId and message are required' });
+  }
+
+  const botText = await getBotResponse(String(userId), String(message));
+  return res.status(200).json({ response: botText });
+
+} catch (err) {
+  console.error('API handler error:', err);
+  return res.status(500).json({ error: 'Internal Server Error' });
+}
