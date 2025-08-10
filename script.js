@@ -1,4 +1,4 @@
-Let tokenizer = null;
+let tokenizer = null;
 const analyzeBtn = document.getElementById('analyzeBtn');
 const progressContainer = document.getElementById('progress-container');
 const progressBar = document.getElementById('progress-bar');
