@@ -13,5 +13,18 @@
   ],
   "includeFiles": [
     "dict/**/*"
+  ],
+  "public": true,
+  "builds": [
+    {
+      "src": "public/**/*",
+      "use": "@vercel/static-build"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/public/$1"
+    }
   ]
 }
