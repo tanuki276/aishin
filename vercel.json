@@ -1,12 +1,18 @@
 {
-  "rewrites": [
+  "functions": {
+    "api/chat.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  },
+  "routes": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/chat"
+      "src": "/api/chat",
+      "dest": "/api/chat.js"
     },
     {
-      "source": "/(.*)",
-      "destination": "/public/$1"
+      "src": "/(.*)",
+      "dest": "/public/$1"
     }
   ]
 }
