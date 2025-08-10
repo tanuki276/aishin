@@ -6,7 +6,7 @@ const contextMap = new Map();
 
 // Vercelはコールドスタートするため、一度初期化が走れば次回以降は高速
 const initTokenizer = new Promise((resolve, reject) => {
-    kuromoji.builder({ dicPath: 'node_modules/kuromoji/dict' }).build((err, builder) => {
+    kuromoji.builder({ dicPath: './dict' }).build((err, builder) => {
         if (err) {
             console.error('Kuromoji initialization failed:', err);
             reject(err);
@@ -18,6 +18,12 @@ const initTokenizer = new Promise((resolve, reject) => {
     });
 });
 
+/**
+ * ユーザーメッセージに基づいてボットの応答を生成
+ * @param {string} userId - ユーザーを識別するID
+ * @param {string} userMessage - ユーザーからのメッセージ
+ * @returns {string} - ボットの応答
+ */
 async function getBotResponse(userId, userMessage) {
     await initTokenizer;
 
@@ -55,10 +61,15 @@ async function getBotResponse(userId, userMessage) {
     return noKeywordResponses[Math.floor(Math.random() * noKeywordResponses.length)];
 }
 
+/**
+ * ユーザーのメッセージから意図を検出
+ * @param {string} text - ユーザーのメッセージ
+ * @returns {string} - 検出された意図（'greeting', 'thanks', 'unknown'など）
+ */
 function detectIntent(text) {
-    const greetingWords = ['こんにちは', 'こんばんは', 'おはよう'];
+    const greetingWords = ['こんにちは', 'こんばんは', 'おはよう', 'やあ'];
     const thanksWords = ['ありがとう', '助かった', '感謝'];
-
+    
     if (greetingWords.some(word => text.includes(word))) {
         return 'greeting';
     }
@@ -68,6 +79,11 @@ function detectIntent(text) {
     return 'unknown';
 }
 
+/**
+ * Kuromojiを使ってメッセージからキーワードを抽出
+ * @param {string} text - ユーザーのメッセージ
+ * @returns {Array<string>} - 抽出されたキーワードの配列
+ */
 function getKeywords(text) {
     const tokens = tokenizer.tokenize(text);
     return tokens
@@ -78,15 +94,20 @@ function getKeywords(text) {
         .map(token => token.surface_form);
 }
 
+/**
+ * Wikipedia APIを呼び出して記事の要約を取得
+ * @param {string} keyword - 検索キーワード
+ * @returns {string|null} - 記事の要約またはnull
+ */
 async function searchWikipediaAndRespond(keyword) {
     const url = `https://ja.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&format=json&origin=*&titles=${encodeURIComponent(keyword)}`;
-
+    
     try {
         const response = await fetch(url);
         const data = await response.json();
         const pages = data.query.pages;
         const pageId = Object.keys(pages)[0];
-
+        
         if (pageId === '-1') return null;
 
         const summary = pages[pageId].extract;
@@ -105,4 +126,31 @@ async function searchWikipediaAndRespond(keyword) {
     }
 }
 
-module.exports = { getBotResponse };
+// Vercelのサーバーレス関数としてエクスポート
+module.exports = async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
+  try {
+    const { userId, message } = req.body;
+
+    if (!userId || !message) {
+      return res.status(400).json({ error: 'userId and message are required.' });
+    }
+
+    const response = await getBotResponse(userId, message);
+    return res.status(200).json({ response });
+  } catch (error) {
+    console.error('Error processing chat request:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+};
