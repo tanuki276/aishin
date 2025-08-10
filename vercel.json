@@ -1,15 +1,15 @@
 {
-  "rewrites": [
-    {
-      "source": "/api/chat",
-      "destination": "/api/chat.js"
-    }
-  ],
   "functions": {
     "api/chat.js": {
       "memory": 1024,
       "maxDuration": 60,
       "includeFiles": "dict/**/*"
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/api/chat",
+      "destination": "/api/chat.js"
+    }
+  ]
 }
