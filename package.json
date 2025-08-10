@@ -1,0 +1,11 @@
+{
+  "name": "vercel-chatbot",
+  "version": "1.0.0",
+  "dependencies": {
+    "kuromoji": "^0.1.2",
+    "node-fetch": "^2.6.1"
+  },
+  "scripts": {
+    "start": "npx http-server public"
+  }
+}
