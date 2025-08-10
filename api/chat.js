@@ -14,7 +14,7 @@ const kuromoji = require('kuromoji');
 let tokenizer = null;
 let initTokenizer = (async () => {
   try {
-    const dictPath = path.join(process.cwd(), 'api', 'dict');
+    const dictPath = path.join(__dirname, 'dict');
     if (!fs.existsSync(dictPath)) {
       console.warn('Warning: kuromoji dict folder not found at', dictPath);
     }
@@ -113,7 +113,7 @@ async function searchWikipediaBestMatch(keyword) {
     const opensearchUrl = `https://ja.wikipedia.org/w/api.php?action=opensearch&limit=5&format=json&origin=*&search=${encodeURIComponent(keyword)}`;
     const opRes = await fetchImpl(opensearchUrl);
     const opJson = await opRes.json();
-    const titles = (opJson && opJson[1]) ? opJson[1] : [];
+    const candidates = (opJson && opJson[1]) ? opJson[1] : [];
 
     for (const title of candidates) {
       const extractUrl = `https://ja.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&format=json&origin=*&titles=${encodeURIComponent(title)}`;
@@ -263,15 +263,3 @@ const handler = async (req, res) => {
     if (!userId || !message) {
       return res.status(400).json({ error: 'userId and message are required' });
     }
-
-    const botText = await getBotResponse(String(userId), String(message));
-    return res.status(200).json({ response: botText });
-  } catch (err) {
-    console.error('API handler error:', err);
-    console.error(err.stack || err);
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-};
-
-module.exports = handler;
-if (typeof exports !== 'undefined') exports.default = handler;
