@@ -1,106 +1,37 @@
-<!DOCTYPE html>  <html lang="ja">  
-<head>  
-<script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>  <meta charset="UTF-8" />  
-<meta name="viewport" content="width=device-width, initial-scale=1" />  
-<title>AI文章判定サイト</title>  
-<style>  
-  body {  
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;  
-    max-width: 600px;  
-    margin: 2rem auto;  
-    padding: 1rem;  
-    background: #f9f9f9;  
-    color: #222;  
-  }  
-  h1 {  
-    text-align: center;  
-    margin-bottom: 1.5rem;  
-  }  
-  textarea {  
-    width: 100%;  
-    height: 150px;  
-    font-size: 1rem;  
-    padding: 0.5rem;  
-    border: 1px solid #ccc;  
-    border-radius: 4px;  
-    resize: vertical;  
-  }  
-  button {  
-    margin-top: 1rem;  
-    padding: 0.6rem 1.2rem;  
-    font-size: 1rem;  
-    background-color: #0066cc;  
-    color: white;  
-    border: none;  
-    border-radius: 4px;  
-    cursor: pointer;  
-  }  
-  button:disabled {  
-    background-color: #ccc;  
-    cursor: not-allowed;  
-  }  
-  button:hover:not(:disabled) {  
-    background-color: #004a99;  
-  }  
-  .result {  
-    margin-top: 1.5rem;  
-    background: white;  
-    border-radius: 4px;  
-    padding: 1rem;  
-    box-shadow: 0 0 8px rgba(0,0,0,0.1);  
-  }  
-  .result p {  
-    margin: 0.3rem 0;  
-  }  
-  .score {  
-    font-weight: bold;  
-    font-size: 1.4rem;  
-  }  
-  .ai {  
-    color: #d9534f;  
-  }  
-  .human {  
-    color: #5cb85c;  
-  }  
-  /* ここからプログレスバーのスタイルを追加 */  
-  .progress-container {  
-    margin-top: 1rem;  
-    width: 100%;  
-    height: 20px;  
-    background-color: #e9ecef;  
-    border-radius: 5px;  
-    overflow: hidden;  
-    position: relative;  
-    display: none; /* 初期状態では非表示 */  
-  }  
-  .progress-bar {  
-    height: 100%;  
-    background-color: #007bff;  
-    width: 0;  
-    transition: width 0.3s ease-in-out;  
-    position: absolute;  
-    top: 0;  
-    left: 0;  
-  }  
-  .progress-text {  
-    position: absolute;  
-    width: 100%;  
-    text-align: center;  
-    line-height: 20px;  
-    color: #343a40;  
-    font-size: 0.9rem;  
-    font-weight: bold;  
-  }  
-</style>  
-</head>  
-<body>  
-  <h1>AI文章判定サイト</h1>  
-  <textarea id="inputText" placeholder="ここに文章を入力してください"></textarea>  
-  <button id="analyzeBtn" disabled>準備中...</button>    <div id="progress-container" class="progress-container">  
-    <div id="progress-bar" class="progress-bar"></div>  
-    <span id="progress-text" class="progress-text">0%</span>  
-  </div>    <div id="result" class="result" style="display:none;">  
-    <p>AI生成度：<span class="score ai" id="aiScore"></span>%</p>  
-    <p>人間度：<span class="score human" id="humanScore"></span>%</p>  
-  </div>    <script src="script.js"></script>  </body>  
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>チャットボット</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f2f5; }
+        .chat-container { width: 400px; height: 600px; background: white; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; flex-direction: column; }
+        .chat-header { background-color: #007bff; color: white; padding: 15px; border-radius: 10px 10px 0 0; text-align: center; font-size: 1.2em; }
+        .chat-messages { flex-grow: 1; padding: 20px; overflow-y: auto; border-bottom: 1px solid #e0e0e0; }
+        .message { margin-bottom: 15px; display: flex; }
+        .user-message { justify-content: flex-end; }
+        .bot-message { justify-content: flex-start; }
+        .user-message .bubble { background-color: #007bff; color: white; padding: 10px 15px; border-radius: 20px 20px 5px 20px; max-width: 80%; }
+        .bot-message .bubble { background-color: #e9e9eb; color: #333; padding: 10px 15px; border-radius: 20px 20px 20px 5px; max-width: 80%; }
+        .chat-input { display: flex; padding: 10px; }
+        .chat-input input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; margin-right: 10px; outline: none; transition: border-color 0.3s; }
+        .chat-input input:focus { border-color: #007bff; }
+        .chat-input button { padding: 10px 20px; border: none; background-color: #007bff; color: white; border-radius: 20px; cursor: pointer; transition: background-color 0.3s; }
+        .chat-input button:hover { background-color: #0056b3; }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="chat-header">チャットボット</div>
+    <div class="chat-messages" id="chat-messages"></div>
+    <div class="chat-input">
+        <input type="text" id="user-input" placeholder="メッセージを入力...">
+        <button id="send-button">送信</button>
+    </div>
+</div>
+
+<script src="main.js"></script>
+</body>
 </html>
