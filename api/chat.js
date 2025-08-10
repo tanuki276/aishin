@@ -59,9 +59,8 @@ async function getBotResponse(userId, userMessage) {
     }
 
     const noKeywordResponses = [
-        "すみません、もう少し具体的に教えていただけますか？",
-        "そのことについては分かりませんでした。別の質問をどうぞ。"
-    ];
+        "すみません、よく分かりません",
+         ];
     return noKeywordResponses[Math.floor(Math.random() * noKeywordResponses.length)];
 }
 
