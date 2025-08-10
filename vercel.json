@@ -1,30 +1,15 @@
 {
-  "functions": {
-    "api/chat.js": {
-      "memory": 1024,
-      "maxDuration": 60
-    }
-  },
   "rewrites": [
     {
       "source": "/api/chat",
       "destination": "/api/chat.js"
     }
   ],
-  "includeFiles": [
-    "dict/**/*"
-  ],
-  "public": true,
-  "builds": [
-    {
-      "src": "public/**/*",
-      "use": "@vercel/static-build"
+  "functions": {
+    "api/chat.js": {
+      "memory": 1024,
+      "maxDuration": 60,
+      "includeFiles": "dict/**/*"
     }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/public/$1"
-    }
-  ]
+  }
 }
