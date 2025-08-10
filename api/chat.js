@@ -7,9 +7,8 @@ const contextMap = new Map();
 
 // Vercelはコールドスタートするため、一度初期化が走れば次回以降は高速
 const initTokenizer = new Promise((resolve, reject) => {
-    // __dirnameを使って絶対パスを指定
     const dictPath = path.join(__dirname, '../dict');
-    
+
     kuromoji.builder({ dicPath: dictPath }).build((err, builder) => {
         if (err) {
             console.error('Kuromoji initialization failed:', err);
@@ -31,37 +30,60 @@ const initTokenizer = new Promise((resolve, reject) => {
 async function getBotResponse(userId, userMessage) {
     await initTokenizer;
 
-    const context = contextMap.get(userId) || { lastKeyword: null };
+    // 文脈オブジェクトに会話履歴を追加
+    const context = contextMap.get(userId) || { lastKeyword: null, history: [] };
+    context.history.push({ role: 'user', text: userMessage });
 
     // 意図に基づく応答ロジック
     const intent = detectIntent(userMessage);
     if (intent === 'greeting') {
-        return "こんにちは！何かお調べしましょうか？";
+        const response = "こんにちは！何かお調べしましょうか？";
+        context.history.push({ role: 'bot', text: response });
+        contextMap.set(userId, context);
+        return response;
     }
     if (intent === 'thanks') {
-        return "どういたしまして！何かあればまたどうぞ。";
+        const response = "どういたしまして！何かあればまたどうぞ。";
+        context.history.push({ role: 'bot', text: response });
+        contextMap.set(userId, context);
+        return response;
     }
 
     // 文脈管理ロジック
-    if (userMessage.includes('それ') && context.lastKeyword) {
-        const response = await searchWikipediaAndRespond(context.lastKeyword);
-        if (response) return response;
+    let searchKeyword = null;
+    const tokens = tokenizer.tokenize(userMessage);
+    const hasSore = tokens.some(token => token.surface_form === 'それ' && token.pos === '代名詞');
+
+    if (hasSore && context.lastKeyword) {
+        // 「それ」を検出した場合、直前のキーワードを使用
+        searchKeyword = context.lastKeyword;
+    } else {
+        // 通常のキーワード抽出
+        const keywords = getKeywords(userMessage);
+        if (keywords.length > 0) {
+            searchKeyword = keywords[0];
+        }
     }
 
-    const keywords = getKeywords(userMessage);
-    if (keywords.length > 0) {
-        const response = await searchWikipediaAndRespond(keywords[0]);
+    if (searchKeyword) {
+        const response = await searchWikipediaAndRespond(searchKeyword);
         if (response) {
-            context.lastKeyword = keywords[0];
-            contextMap.set(userId, context);
+            context.lastKeyword = searchKeyword; // 最後のキーワードを更新
+            context.history.push({ role: 'bot', text: response }); // 履歴にボットの応答を追加
+            contextMap.set(userId, context); // 文脈を保存
             return response;
         }
     }
 
+    // キーワードが見つからなかった場合
     const noKeywordResponses = [
-        "すみません、よく分かりません",
-         ];
-    return noKeywordResponses[Math.floor(Math.random() * noKeywordResponses.length)];
+        "すみません、よく分かりません。",
+        "ごめんなさい、その言葉はちょっと理解できませんでした。"
+    ];
+    const finalResponse = noKeywordResponses[Math.floor(Math.random() * noKeywordResponses.length)];
+    context.history.push({ role: 'bot', text: finalResponse });
+    contextMap.set(userId, context);
+    return finalResponse;
 }
 
 /**
@@ -72,7 +94,7 @@ async function getBotResponse(userId, userMessage) {
 function detectIntent(text) {
     const greetingWords = ['こんにちは', 'こんばんは', 'おはよう', 'やあ'];
     const thanksWords = ['ありがとう', '助かった', '感謝'];
-    
+
     if (greetingWords.some(word => text.includes(word))) {
         return 'greeting';
     }
@@ -98,34 +120,49 @@ function getKeywords(text) {
 }
 
 /**
- * Wikipedia APIを呼び出して記事の要約を取得
+ * Wikipedia APIを呼び出して記事の要約を取得（応答をより自然に改良）
  * @param {string} keyword - 検索キーワード
  * @returns {string|null} - 記事の要約またはnull
  */
 async function searchWikipediaAndRespond(keyword) {
     const url = `https://ja.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&format=json&origin=*&titles=${encodeURIComponent(keyword)}`;
-    
+
     try {
         const response = await fetch(url);
         const data = await response.json();
         const pages = data.query.pages;
         const pageId = Object.keys(pages)[0];
-        
-        if (pageId === '-1') return null;
+
+        if (pageId === '-1') {
+            return `「${keyword}」という言葉について、Wikipediaでは情報を見つけられませんでした。`;
+        }
 
         const summary = pages[pageId].extract;
         if (summary) {
-            const responsePatterns = [
-                `${keyword}についてですね。${summary.substring(0, 200)}...さらに詳しく知りたいことはありますか？`,
-                `はい、${keyword}について調べてみました。${summary.substring(0, 200)}...何か他にお手伝いできることはありますか？`
+            // 応答の多様化
+            const summary_short = summary.substring(0, 150) + '...';
+            const introPatterns = [
+                `お調べしました。「${keyword}」についてですね。`,
+                `はい、「${keyword}」ですね。Wikipediaによると、`,
+                `なるほど、「${keyword}」ですね。`
             ];
-            return responsePatterns[Math.floor(Math.random() * responsePatterns.length)];
+            const outroPatterns = [
+                `...という情報がありました。他に何か知りたいことはありますか？`,
+                `...のようです。さらに詳しく調べますか？`,
+                `...と書かれています。`
+            ];
+
+            const intro = introPatterns[Math.floor(Math.random() * introPatterns.length)];
+            const outro = outroPatterns[Math.floor(Math.random() * outroPatterns.length)];
+            
+            return `${intro}${summary_short}${outro}`;
         }
+        
         return null;
 
     } catch (error) {
         console.error("Wikipedia search failed:", error);
-        return null;
+        return "申し訳ありません。検索中にエラーが発生しました。";
     }
 }
 
