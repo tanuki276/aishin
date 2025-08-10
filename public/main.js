@@ -24,8 +24,7 @@ async function sendMessage() {
 
     // APIサーバーへリクエストを送信
     try {
-        // !!! ここをデプロイしたAPIのURLに書き換えてください !!!
-        const apiEndpoint = 'https://[your-vercel-domain]/api/chat';
+        const apiEndpoint = 'https://dagt-aic.vercel.app/api/chat';
         
         const response = await fetch(apiEndpoint, {
             method: 'POST',
