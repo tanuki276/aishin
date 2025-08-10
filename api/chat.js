@@ -1,12 +1,16 @@
 const kuromoji = require('kuromoji');
 const fetch = require('node-fetch');
+const path = require('path');
 
 let tokenizer;
 const contextMap = new Map();
 
 // Vercelはコールドスタートするため、一度初期化が走れば次回以降は高速
 const initTokenizer = new Promise((resolve, reject) => {
-    kuromoji.builder({ dicPath: './dict' }).build((err, builder) => {
+    // __dirnameを使って絶対パスを指定
+    const dictPath = path.join(__dirname, '../dict');
+    
+    kuromoji.builder({ dicPath: dictPath }).build((err, builder) => {
         if (err) {
             console.error('Kuromoji initialization failed:', err);
             reject(err);
