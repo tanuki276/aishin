@@ -37,7 +37,7 @@ const initTokenizer = (async () => {
 // --- コンテキスト/履歴管理 ---
 const contextMap = new Map();
 const MAX_HISTORY = 20;
-const CONTEXT_TTL_MS = 1000 * 60 * 30; // 30分に延長
+const CONTEXT_TTL_MS = 1000 * 60 * 30;
 
 function nowTs() { return Date.now(); }
 function pushHistory(ctx, role, text) {
@@ -51,7 +51,6 @@ function choose(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function getRelevantKeywords(tokens, ctx) {
     const nouns = tokens.filter(t => t.pos === '名詞' && t.surface_form.length > 1).map(t => t.surface_form);
     const keywords = [...new Set(nouns)];
-    // 以前の会話のキーワードを重み付けして追加
     if (ctx && ctx.lastKeywords) {
         for (const k of ctx.lastKeywords) {
             if (!keywords.includes(k)) keywords.push(k);
@@ -62,7 +61,7 @@ function getRelevantKeywords(tokens, ctx) {
 
 // --- 質問の意図とエンティティをより精密に解析 ---
 function analyzeUserQuery(tokens, userMessage, ctx) {
-    const intent = {};
+    const intent = { type: 'unknown', entity: null, property: null };
     const nouns = tokens.filter(t => t.pos === '名詞').map(t => t.surface_form);
     
     // インテントを決定
@@ -72,22 +71,21 @@ function analyzeUserQuery(tokens, userMessage, ctx) {
     else if (/(天気|気温|雨|晴れ)/.test(userMessage)) intent.type = 'weather';
     else if (/(作り方|レシピ|材料)/.test(userMessage)) intent.type = 'recipe';
     else if (/(とは|とは何|は？|って何)/.test(userMessage)) intent.type = 'definition';
+    else if (/(どうして|なぜ|理由)/.test(userMessage)) intent.type = 'why';
     else if (nouns.length > 0) intent.type = 'knowledge';
     else intent.type = 'smalltalk';
-    
+
     // エンティティとプロパティを抽出
-    intent.entity = null;
-    intent.property = null;
     let keywordList = getRelevantKeywords(tokens, ctx);
     
     if (intent.type === 'weather') {
         const place = nouns.find(n => n.endsWith('市') || n.endsWith('都') || n.endsWith('県') || n.endsWith('区'));
         intent.entity = place || ctx.lastPlace;
     } else if (intent.type === 'recipe') {
-        const recipeNoun = nouns.find(n => !n.includes('作り方') && !n.includes('レシピ') && !n.includes('材料'));
+        const recipeNoun = nouns.find(n => !/(作り方|レシピ|材料)/.test(n));
         intent.entity = recipeNoun || (ctx.lastKeywords.length > 0 ? ctx.lastKeywords[0] : null);
-        intent.property = nouns.find(n => n.includes('作り方') || n.includes('レシピ') || n.includes('材料'));
-    } else if (intent.type === 'definition' || intent.type === 'knowledge') {
+        intent.property = nouns.find(n => /(作り方|レシピ|材料)/.test(n));
+    } else if (intent.type === 'definition' || intent.type === 'knowledge' || intent.type === 'why') {
         // 「...の...は？」のような構造を解析
         const particles = tokens.filter(t => t.pos === '助詞');
         const noParticle = particles.find(p => p.surface_form === 'の');
@@ -98,7 +96,6 @@ function analyzeUserQuery(tokens, userMessage, ctx) {
             if (propCandidate && propCandidate.pos === '名詞') intent.property = propCandidate.surface_form;
             if (entityCandidate && entityCandidate.pos === '名詞') intent.entity = entityCandidate.surface_form;
         }
-        // 他のケースのエンティティ
         if (!intent.entity && keywordList.length > 0) intent.entity = keywordList[0];
     }
     
@@ -118,7 +115,6 @@ function generateResponse(intent, data, ctx) {
         return null;
     }
     
-    // データから応答を動的に生成
     if (intent.type === 'recipe' && intent.property) {
         return `${intent.entity}の${intent.property}ですね。${data}という情報があります。`;
     }
@@ -129,11 +125,10 @@ function generateResponse(intent, data, ctx) {
         return `「${intent.entity}」とは、${data}のことです。`;
     }
     
-    // 汎用的な応答
     return `${data}についてお答えしました。他に何か知りたいことはありますか？`;
 }
 
-// --- Wikipedia (ja) 検索 (フォールバック) ---
+// --- APIツール: Wikipedia (ja) ---
 async function tryWikipedia(keyword) {
     if (!fetch || !keyword) return null;
     try {
@@ -158,7 +153,25 @@ async function tryWikipedia(keyword) {
     return null;
 }
 
-// --- Open-Meteo 検索 (フォールバック) ---
+// --- APIツール: DuckDuckGo Instant Answer ---
+async function tryDuckDuckGo(q){
+    if (!fetch || !q) return null;
+    try {
+        const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skipsdisambig=1`;
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const j = await res.json();
+        if (j && j.AbstractText && j.AbstractText.length) {
+            const txt = j.AbstractText.length > 600 ? j.AbstractText.substring(0,600)+'...' : j.AbstractText;
+            return { source: 'duckduckgo', title: j.Heading || q, text: txt };
+        }
+    } catch (err) {
+        // ignore
+    }
+    return null;
+}
+
+// --- APIツール: Open-Meteo ---
 async function getWeatherForPlace(place) {
     if (!fetch || !place) return null;
     try {
@@ -183,6 +196,30 @@ async function getWeatherForPlace(place) {
     return null;
 }
 
+// --- APIツール: Joke API ---
+async function getJoke(){
+    if (!fetch) return null;
+    try {
+      const res = await fetch('https://official-joke-api.appspot.com/random_joke');
+      if (!res.ok) return null;
+      const j = await res.json();
+      if (j && j.setup) return { source: 'joke', text: `${j.setup} — ${j.punchline || ''}`.trim() };
+    } catch(e){ }
+    return null;
+}
+
+// --- APIツール: Advice API ---
+async function getAdvice(){
+    if (!fetch) return null;
+    try {
+      const res = await fetch('https://api.adviceslip.com/advice');
+      if (!res.ok) return null;
+      const j = await res.json();
+      if (j && j.slip && j.slip.advice) return { source: 'advice-slip', text: j.slip.advice };
+    } catch(e){}
+    return null;
+}
+
 // --- メインの応答関数 ---
 async function getBotResponse(userId, userMessage) {
     await initTokenizer;
@@ -200,36 +237,23 @@ async function getBotResponse(userId, userMessage) {
 
     let responseText = null;
 
-    // 1. 定型インテント応答
+    // 1. 定型インテント応答 (API呼び出しなし)
     if (intent.type === 'greeting') responseText = choose(metaData.greetings);
     if (intent.type === 'thanks') responseText = choose(metaData.thanks);
-    if (intent.type === 'joke') responseText = choose(metaData.jokes);
     if (intent.type === 'smalltalk') responseText = choose(metaData.smalltalks);
+
     if (responseText) {
         pushHistory(ctx, 'bot', responseText);
         contextMap.set(userId, ctx);
         return { text: responseText };
     }
 
-    // 2. ローカル知識ベース検索
-    const entity = intent.entity;
-    const property = intent.property;
-
-    if (entity && knowledgeBase[entity]) {
-        if (property && knowledgeBase[entity][property]) {
-            responseText = generateResponse(intent, knowledgeBase[entity][property], ctx);
-        } else if (knowledgeBase[entity].default) {
-            // プロパティが不明な場合はデフォルトの情報を返す
-            responseText = generateResponse(intent, knowledgeBase[entity].default, ctx);
-        }
+    // 2. 外部APIを積極的に活用
+    if (intent.type === 'joke') {
+        const joke = await getJoke();
+        responseText = joke ? joke.text : choose(metaData.clarifications);
     }
-    if (responseText) {
-        pushHistory(ctx, 'bot', responseText);
-        contextMap.set(userId, ctx);
-        return { text: responseText };
-    }
-
-    // 3. 外部APIを最終手段として利用
+    
     if (intent.type === 'weather' && intent.entity) {
         const weatherInfo = await getWeatherForPlace(intent.entity);
         if (weatherInfo) {
@@ -239,14 +263,44 @@ async function getBotResponse(userId, userMessage) {
             responseText = `ごめんなさい、${intent.entity}の天気情報を取得できませんでした。`;
         }
     }
-    if (!responseText && entity) {
-        const wikiResult = await tryWikipedia(entity);
-        if (wikiResult) {
-            responseText = `「${wikiResult.title}」についてですね。${wikiResult.text}`;
+    
+    if (responseText) {
+        pushHistory(ctx, 'bot', responseText);
+        contextMap.set(userId, ctx);
+        return { text: responseText };
+    }
+    
+    // 3. ローカル知識ベース検索
+    const entity = intent.entity;
+    const property = intent.property;
+
+    if (entity && knowledgeBase[entity]) {
+        if (property && knowledgeBase[entity][property]) {
+            responseText = generateResponse(intent, knowledgeBase[entity][property], ctx);
+        } else if (knowledgeBase[entity].default) {
+            responseText = generateResponse(intent, knowledgeBase[entity].default, ctx);
         }
     }
 
-    // 4. 応答が見つからなかった場合のフォールバック
+    if (responseText) {
+        pushHistory(ctx, 'bot', responseText);
+        contextMap.set(userId, ctx);
+        return { text: responseText };
+    }
+
+    // 4. 外部知識APIを最終手段として利用
+    const searchKeyword = entity || userMessage;
+    const wikiResult = await tryWikipedia(searchKeyword);
+    if (wikiResult) {
+        responseText = `「${wikiResult.title}」についてですね。${wikiResult.text}`;
+    } else {
+        const ddgResult = await tryDuckDuckGo(searchKeyword);
+        if (ddgResult) {
+            responseText = `${ddgResult.title}についての情報です：${ddgResult.text}`;
+        }
+    }
+
+    // 5. 応答が見つからなかった場合のフォールバック
     if (!responseText) {
         responseText = choose(metaData.clarifications);
     }
@@ -258,7 +312,6 @@ async function getBotResponse(userId, userMessage) {
 
 // --- HTTP Handler for Vercel ---
 module.exports = async (req, res) => {
-    // CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
