@@ -1,3 +1,4 @@
+// --- 変更なしの既存部分 ---
 const path = require('path');
 const fs = require('fs');
 const kuromoji = require('kuromoji');
@@ -224,4 +225,242 @@ async function getWeatherForPlace(place){
   return null;
 }
 
-const smalltalkPools =
+const smalltalkPools = {
+  neutral: ['ふむ、なるほどね。','へえ、そうなんだ！','面白いね。もっと聞かせて？','いいね、その話。'],
+  snarky: ['そう？でも本気で言ってるの？','おや、それは意外（としか言えない）','ふーん、君は勇気あるね。'],
+  kind: ['いいね、よくやったね。','素敵な話だね。ありがとう。','そういうの聞けて嬉しいよ。']
+};
+function smalltalk(mode='neutral'){ return choose(smalltalkPools[mode] || smalltalkPools.neutral); }
+
+// --- 変更ここから ---
+async function getBotResponse(userId, userMessage, opts = {}){
+  await initTokenizer;
+
+  const now = nowTs();
+  let ctx = contextMap.get(userId);
+  if (!ctx || (now - (ctx.updatedAt || 0) > CONTEXT_TTL_MS)) {
+    ctx = { history: [], persona: opts.persona || 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
+  }
+
+  let isNewTopic = false;
+  if (ctx.lastKeyword) {
+    let currentKeywords = getCompoundKeywordsFromTokens(tokenizer.tokenize(userMessage));
+    if (!currentKeywords.some(k => ctx.lastKeyword.includes(k) || k.includes(ctx.lastKeyword))) {
+      isNewTopic = true;
+    }
+  }
+  if (isNewTopic) {
+      console.log('Detected new topic. Resetting context for userId=', userId);
+      ctx = { history: [], persona: opts.persona || 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
+  }
+
+  pushHistory(ctx, 'user', userMessage);
+
+  const intent = detectIntent(userMessage);
+
+  if (intent === 'greeting') {
+    const r = choose(['こんにちは！今日どうする？','やあ！何か知りたい？','おっす、調べ・雑談どっちがいい？']);
+    pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
+    return { text: r, meta: { mode: 'greeting' } };
+  }
+  if (intent === 'thanks') {
+    const r = choose(['どういたしまして！','いつでも聞いてね。']);
+    pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
+    return { text: r, meta: { mode: 'thanks' } };
+  }
+
+  if (intent === 'recipe') {
+    const recipeKeywords = getCompoundKeywordsFromTokens(tokenizer.tokenize(userMessage)).filter(k => !/(作り方|レシピ|材料|献立|調理法)/.test(k));
+    const query = recipeKeywords.length > 0 ? recipeKeywords.join(' ') : userMessage;
+    const recipeResult = await trySpoonacular(query);
+    if (recipeResult) {
+      const reply = `${recipeResult.text} 他にも何か知りたいことはありますか？`;
+      pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+      return { text: reply, meta: { source: 'spoonacular', title: recipeResult.title } };
+    }
+  }
+
+  if (intent === 'math') {
+    const mathResult = await tryWolframAlpha(userMessage);
+    if (mathResult) {
+      const reply = `計算結果は以下の通りです： ${mathResult.text}`;
+      pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+      return { text: reply, meta: { source: 'wolframalpha' } };
+    }
+  }
+
+  if (intent === 'joke') {
+    const j = await getJoke();
+    if (j) { pushHistory(ctx, 'bot', j.text); contextMap.set(userId, ctx); return { text: j.text, meta: { source: j.source } }; }
+  }
+  if (intent === 'advice') {
+    const a = await getAdvice();
+    if (a) { pushHistory(ctx, 'bot', a.text); contextMap.set(userId, ctx); return { text: a.text, meta: { source: a.source } }; }
+  }
+
+  let tokens = [];
+  if (tokenizer) {
+    try { tokens = tokenizer.tokenize(userMessage); } catch (e) { /* ignore */ }
+  }
+  const extractedKeywords = getCompoundKeywordsFromTokens(tokens).filter(k => k.length > 1);
+
+  // 検索クエリの優先順位リスト
+  const searchQueries = [];
+  // 1. 入力全体
+  searchQueries.push(userMessage);
+  // 2. 複数のキーワードをスペースで結合
+  if (extractedKeywords.length > 1) {
+    searchQueries.push(extractedKeywords.join(' '));
+  }
+  // 3. 個々のキーワード
+  searchQueries.push(...extractedKeywords);
+
+  // コア参照を解決し、検索クエリに追加
+  const coref = resolveCoref(userMessage, ctx);
+  if (coref) {
+      const corefQuery = `${coref} ${extractedKeywords.join(' ')}`.trim();
+      searchQueries.unshift(corefQuery);
+  }
+
+  // 重複を削除して、優先順位通りに検索を試みる
+  const uniqueQueries = [...new Set(searchQueries)].filter(q => q.length > 0);
+
+  // 天気検索
+  if (intent === 'weather') {
+    for (const q of uniqueQueries) {
+      const w = await getWeatherForPlace(q);
+      if (w) {
+        ctx.lastKeyword = q;
+        ctx.lastEntities.unshift({ title: q, ts: now });
+        if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
+        const reply = w.text + ' 他に何か知りたい？';
+        pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+        return { text: reply, meta: { source: w.source, usedKeyword: q } };
+      }
+    }
+  }
+
+  // 一般検索
+  for (const q of uniqueQueries) {
+    // Wikipediaを試す
+    const wiki = await tryWikipedia(q);
+    if (wiki) {
+      ctx.lastKeyword = q;
+      ctx.lastEntities.unshift({ title: wiki.title, ts: now });
+      if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
+      const reply = `お調べしました：「${wiki.title}」 — ${wiki.text}。他に知りたいことはありますか？`;
+      pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+      return { text: reply, meta: { source: wiki.source, title: wiki.title, usedQuery: q } };
+    }
+
+    // DuckDuckGoを試す
+    const ddg = await tryDuckDuckGo(q);
+    if (ddg) {
+      ctx.lastKeyword = q;
+      ctx.lastEntities.unshift({ title: ddg.title, ts: now });
+      if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
+      const reply = `ちょっと調べたら、「${ddg.title}」に関する情報が見つかりました：${ddg.text}。どうでしょうか？`;
+      pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+      return { text: reply, meta: { source: ddg.source, title: ddg.title, usedQuery: q } };
+    }
+  }
+
+  // どの検索も失敗した場合
+  // 抽出されたキーワードがある場合は、それを基に回答を試みる
+  if (extractedKeywords.length > 0) {
+    const keywords = extractedKeywords.join('、');
+    const reply = `すみません、「${keywords}」に関する情報をうまく見つけることができませんでした。質問の内容を変えていただけますか？`;
+    pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+    return { text: reply, meta: { mode: 'search_fail', keywords: extractedKeywords } };
+  }
+
+  const persona = ctx.persona || 'neutral';
+  const s = smalltalk(persona);
+  pushHistory(ctx, 'bot', s); contextMap.set(userId, ctx);
+  return { text: s, meta: { mode: 'smalltalk', persona } };
+}
+
+// --- 変更ここから ---
+
+function isEchoMessage(userId, message){
+  if (!message) return false;
+  const ctx = contextMap.get(userId);
+  if (!ctx || !ctx.history || ctx.history.length === 0) return false;
+  for (let i = ctx.history.length - 1; i >= 0; i--){
+    const item = ctx.history[i];
+    if (item.role === 'bot' && item.text) {
+      return String(item.text).trim() === String(message).trim();
+    }
+  }
+  return false;
+}
+
+module.exports = async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  try {
+    let body = {};
+    if (req.method === 'POST') {
+      body = typeof req.body === 'object' ? req.body : (req.body ? JSON.parse(req.body) : {});
+    }
+
+    let userId = null;
+    let message = null;
+    let wantInit = false;
+
+    if (req.method === 'POST') {
+      userId = body && body.userId ? String(body.userId) : (body && body.user && body.user.id ? String(body.user.id) : 'anon');
+      message = (typeof body.message !== 'undefined') ? (body.message === null ? '' : String(body.message)) : null;
+      wantInit = !!body.init;
+    } else {
+      userId = req.query && req.query.userId ? String(req.query.userId) : (req.query && req.query.user ? String(req.query.user) : 'anon');
+      message = (typeof req.query.message !== 'undefined') ? String(req.query.message) : (req.query.q || null);
+      wantInit = req.query && (req.query.init === '1' || req.query.init === 'true' || req.query.welcome === '1');
+    }
+
+    if (!userId) userId = 'anon';
+
+    if (isEchoMessage(userId, message)) {
+      console.log('Ignored echo message for userId=', userId);
+      const resp = { reply: '', text: '', ignored: true, reason: 'echo' };
+      return res.status(200).json(resp);
+    }
+
+    if (wantInit) {
+      const welcome = '何か質問はありますか？';
+      const now = nowTs();
+      const ctx = contextMap.get(userId) || { history: [], persona: 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
+      pushHistory(ctx, 'bot', welcome);
+      contextMap.set(userId, ctx);
+      return res.status(200).json({ reply: welcome, text: welcome, meta: { welcome: true } });
+    }
+
+    if (!message) {
+      return res.status(400).json({
+        reply: '',
+        text: '',
+        error: 'message (or q) is required. To get welcome, provide init=true or send a message.'
+      });
+    }
+
+    const start = Date.now();
+    const result = await getBotResponse(userId, message, { persona: req.query && req.query.persona ? req.query.persona : undefined });
+    const took = Date.now() - start;
+    const replyText = result && result.text ? result.text : 'すみません、応答できませんでした。';
+    const responseBody = {
+      reply: replyText,
+      text: replyText,
+      meta: result && result.meta ? result.meta : {},
+      took_ms: took
+    };
+    return res.status(200).json(responseBody);
+
+  } catch (err) {
+    console.error('handler error', err && err.stack ? err.stack : err);
+    return res.status(500).json({ reply: '', text: '', error: 'Internal Server Error', detail: err && err.message ? err.message : String(err) });
+  }
+};
