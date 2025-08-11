@@ -15,9 +15,10 @@ try {
 }
 // ----------------------------------------
 
-// ---- APIキーの設定 (重要: 環境変数から読み込むことを推奨) ----
-const SPOONACULAR_API_KEY = process.env.SPOONACULAR_API_KEY || 'YOUR_SPOONACULAR_API_KEY';
-const WOLFRAM_ALPHA_APP_ID = process.env.WOLFRAM_ALPHA_APP_ID || 'YOUR_WOLFRAM_ALPHA_APP_ID';
+// ---- APIキーを環境変数から読み込む ----
+const SPOONACULAR_API_KEY = process.env.SPOONACULAR_API_KEY;
+const WOLFRAM_ALPHA_APP_ID = process.env.WOLFRAM_ALPHA_APP_ID;
+// ----------------------------------------
 
 // ---- fetch フォールバック ----
 let fetchImpl = (typeof globalThis !== 'undefined' && globalThis.fetch) ? globalThis.fetch : null;
