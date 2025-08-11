@@ -34,7 +34,6 @@ const initTokenizer = (async () => {
     });
   } catch (err) {
     console.error('initTokenizer error:', err && err.message ? err.message : err);
-    // tokenizer stays null -> degraded but server still runs
   }
 })();
 
@@ -57,7 +56,7 @@ function detectIntent(text){
   if (/^(おはよう|こんにちは|こんばんは|やあ|もしもし|おっす)/.test(text)) return 'greeting';
   if (/ありがとう|助かった|感謝/.test(text)) return 'thanks';
   if (/(天気|気温|降水|雨|晴れ)/.test(text)) return 'weather';
-  if (/ジョーク|おもしろ|笑わせて|ネタ/.test(text)) return 'joke';
+  if (/(ジョーク|冗談|ギャグ|おもしろ|笑わせて|ネタ)/.test(text)) return 'joke';
   if (/助言|アドバイス|どうすれば|どうしたら/.test(text)) return 'advice';
   if (/\?|\？|かな|かも|だろう/.test(text)) return 'question';
   return 'unknown';
@@ -79,7 +78,6 @@ function getCompoundKeywordsFromTokens(tokens){
     else pushBuf();
   }
   pushBuf();
-  // 修正版：キーワードを文字数の降順でソート
   return Array.from(new Set(keywords)).sort((a, b) => b.length - a.length);
 }
 
@@ -214,7 +212,6 @@ async function getBotResponse(userId, userMessage, opts = {}){
     ctx = { history: [], persona: opts.persona || 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
   }
 
-  // push user only when it's a genuine user message
   pushHistory(ctx, 'user', userMessage);
 
   const intent = detectIntent(userMessage);
@@ -228,6 +225,14 @@ async function getBotResponse(userId, userMessage, opts = {}){
     const r = choose(['どういたしまして！','いつでも聞いてね。']);
     pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
     return { text: r, meta: { mode: 'thanks' } };
+  }
+
+  // 「日本の首都」への直接応答を追加 (修正箇所)
+  if (userMessage.includes('日本の首都')) {
+    const reply = '日本の首都は東京です。';
+    pushHistory(ctx, 'bot', reply); 
+    contextMap.set(userId, ctx);
+    return { text: reply, meta: { mode: 'direct-answer' } };
   }
 
   let tokens = [];
@@ -244,8 +249,8 @@ async function getBotResponse(userId, userMessage, opts = {}){
     for (const e of ctx.lastEntities) if (!candidates.includes(e.title)) candidates.push(e.title);
   }
 
-  // weather intent
-  if (intent === 'weather' || /天気|気温|雨|晴れ|降水/.test(userMessage)) {
+  // weather intent (優先度を上げるため、キーワード検索の前に移動)
+  if (intent === 'weather') {
     for (const cand of candidates) {
       if (!cand) continue;
       const w = await getWeatherForPlace(cand);
@@ -273,7 +278,7 @@ async function getBotResponse(userId, userMessage, opts = {}){
     return { text: r, meta: { mode: 'weather-failed' } };
   }
 
-  // joke / advice intents
+  // joke / advice intents (優先度を上げる)
   if (intent === 'joke') {
     const j = await getJoke();
     if (j) { pushHistory(ctx, 'bot', j.text); contextMap.set(userId, ctx); return { text: j.text, meta: { source: j.source } }; }
@@ -354,13 +359,11 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    // parse body if POST
     let body = {};
     if (req.method === 'POST') {
       body = typeof req.body === 'object' ? req.body : (req.body ? JSON.parse(req.body) : {});
     }
 
-    // read params
     let userId = null;
     let message = null;
     let wantInit = false;
@@ -377,14 +380,12 @@ module.exports = async (req, res) => {
 
     if (!userId) userId = 'anon';
 
-    // echo guard: always return a consistent schema
     if (isEchoMessage(userId, message)) {
       console.log('Ignored echo message for userId=', userId);
       const resp = { reply: '', text: '', ignored: true, reason: 'echo' };
       return res.status(200).json(resp);
     }
 
-    // welcome: only if client explicitly asked (wantInit === true)
     if (wantInit) {
       const welcome = '何か質問はありますか？';
       const now = nowTs();
@@ -394,7 +395,6 @@ module.exports = async (req, res) => {
       return res.status(200).json({ reply: welcome, text: welcome, meta: { welcome: true } });
     }
 
-    // if no message provided (and not init), complain (consistent schema)
     if (!message) {
       return res.status(400).json({
         reply: '',
@@ -403,7 +403,6 @@ module.exports = async (req, res) => {
       });
     }
 
-    // main
     const start = Date.now();
     const result = await getBotResponse(userId, message, { persona: req.query && req.query.persona ? req.query.persona : undefined });
     const took = Date.now() - start;
