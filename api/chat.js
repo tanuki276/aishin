@@ -3,9 +3,14 @@ const fs = require('fs');
 
 // --- data.json から知識ベースを読み込む ---
 const dataPath = path.join(__dirname, 'data.json');
-const rawData = fs.readFileSync(dataPath);
-const botData = JSON.parse(rawData);
-const knowledgeBase = botData.knowledgeBase;
+let knowledgeBase = {};
+try {
+  const rawData = fs.readFileSync(dataPath, 'utf8');
+  const botData = JSON.parse(rawData);
+  knowledgeBase = botData.knowledgeBase || {};
+} catch (error) {
+  console.error('Failed to load data.json:', error.message);
+}
 // ----------------------------------------
 
 // ---- fetch フォールバック ----
@@ -223,16 +228,6 @@ async function getBotResponse(userId, userMessage, opts = {}){
 
   pushHistory(ctx, 'user', userMessage);
 
-  // 知識ベースから応答を検索
-  for (const k in knowledgeBase) {
-    if (userMessage.includes(k)) {
-      const reply = knowledgeBase[k];
-      pushHistory(ctx, 'bot', reply);
-      contextMap.set(userId, ctx);
-      return { text: reply, meta: { mode: 'knowledge-base' } };
-    }
-  }
-
   const intent = detectIntent(userMessage);
 
   if (intent === 'greeting') {
@@ -253,9 +248,19 @@ async function getBotResponse(userId, userMessage, opts = {}){
 
   const coref = resolveCoref(userMessage, ctx);
   const extracted = getCompoundKeywordsFromTokens(tokens);
+  
+  // 知識ベースから得られる「ヒント」と複合キーワードの候補を生成
   const candidates = [];
   if (coref) candidates.push(coref);
-  for (const k of extracted) if (!candidates.includes(k)) candidates.push(k);
+  for (const k of extracted) {
+    // 複合キーワードが知識ベースに存在する場合、その答えを検索候補として追加
+    if (knowledgeBase[k]) {
+      candidates.push(knowledgeBase[k]);
+    }
+    if (!candidates.includes(k)) {
+      candidates.push(k);
+    }
+  }
   if (ctx.lastEntities && ctx.lastEntities.length) {
     for (const e of ctx.lastEntities) if (!candidates.includes(e.title)) candidates.push(e.title);
   }
