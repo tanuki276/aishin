@@ -19,15 +19,19 @@ try {
 // --- Kuromoji 初期化 ---
 let tokenizer = null;
 const initTokenizer = (async () => {
-    const dictPath = path.join(path.dirname(require.resolve('kuromoji')), '..', 'dict');
-    await new Promise((resolve, reject) => {
-        kuromoji.builder({ dicPath: dictPath }).build((err, built) => {
-            if (err) return reject(err);
-            tokenizer = built;
-            console.log('Kuromoji ready.');
-            resolve();
+    try {
+        const dictPath = path.join(path.dirname(require.resolve('kuromoji')), '..', 'dict');
+        await new Promise((resolve, reject) => {
+            kuromoji.builder({ dicPath: dictPath }).build((err, built) => {
+                if (err) return reject(err);
+                tokenizer = built;
+                console.log('Kuromoji ready.');
+                resolve();
+            });
         });
-    });
+    } catch (err) {
+        console.error('initTokenizer error:', err && err.message ? err.message : err);
+    }
 })();
 
 // --- コンテキスト/履歴管理 ---
@@ -81,7 +85,7 @@ function analyzeUserQuery(tokens, userMessage, ctx) {
         intent.entity = place || ctx.lastPlace;
     } else if (intent.type === 'recipe') {
         const recipeNoun = nouns.find(n => !n.includes('作り方') && !n.includes('レシピ') && !n.includes('材料'));
-        intent.entity = recipeNoun || ctx.lastKeywords[0];
+        intent.entity = recipeNoun || (ctx.lastKeywords.length > 0 ? ctx.lastKeywords[0] : null);
         intent.property = nouns.find(n => n.includes('作り方') || n.includes('レシピ') || n.includes('材料'));
     } else if (intent.type === 'definition' || intent.type === 'knowledge') {
         // 「...の...は？」のような構造を解析
@@ -129,9 +133,55 @@ function generateResponse(intent, data, ctx) {
     return `${data}についてお答えしました。他に何か知りたいことはありますか？`;
 }
 
-// --- 外部API（フォールバック） ---
-async function tryWikipedia(keyword) { /* ... 既存のコードをそのまま利用 ... */ }
-async function getWeatherForPlace(place) { /* ... 既存のコードをそのまま利用 ... */ }
+// --- Wikipedia (ja) 検索 (フォールバック) ---
+async function tryWikipedia(keyword) {
+    if (!fetch || !keyword) return null;
+    try {
+        const opUrl = `https://ja.wikipedia.org/w/api.php?action=opensearch&limit=1&format=json&origin=*&search=${encodeURIComponent(keyword)}`;
+        const opRes = await fetch(opUrl);
+        if (!opRes.ok) return null;
+        const opJson = await opRes.json();
+        const title = opJson && opJson[1] && opJson[1][0] ? opJson[1][0] : null;
+        if (!title) return null;
+
+        const sumUrl = `https://ja.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+        const sres = await fetch(sumUrl);
+        if (!sres.ok) return null;
+        const sjson = await sres.json();
+        if (sjson && sjson.extract) {
+            const text = sjson.extract.length > 600 ? sjson.extract.substring(0, 600) + '...' : sjson.extract;
+            return { source: 'wikipedia', title: sjson.title, text };
+        }
+    } catch (err) {
+        console.warn('tryWikipedia error', err && err.message ? err.message : err);
+    }
+    return null;
+}
+
+// --- Open-Meteo 検索 (フォールバック) ---
+async function getWeatherForPlace(place) {
+    if (!fetch || !place) return null;
+    try {
+        const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(place)}&limit=1`;
+        const nom = await fetch(nomUrl, { headers: { 'User-Agent': 'vercel-chat-example/1.0' } });
+        if (!nom.ok) return null;
+        const nomj = await nom.json();
+        if (!nomj || !nomj[0]) return null;
+        const lat = parseFloat(nomj[0].lat), lon = parseFloat(nomj[0].lon), display = nomj[0].display_name;
+        const meto = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&timezone=auto`;
+        const mres = await fetch(meto);
+        if (!mres.ok) return null;
+        const mj = await mres.json();
+        if (mj && mj.current_weather) {
+            const cw = mj.current_weather;
+            const text = `${display}の現在の天気: 気温 ${cw.temperature}°C、風速 ${cw.windspeed} m/sです。`;
+            return { source: 'open-meteo', text, place: display };
+        }
+    } catch (e) {
+        console.warn('getWeatherForPlace error', e && e.message ? e.message : e);
+    }
+    return null;
+}
 
 // --- メインの応答関数 ---
 async function getBotResponse(userId, userMessage) {
@@ -206,5 +256,40 @@ async function getBotResponse(userId, userMessage) {
     return { text: responseText };
 }
 
-// --- HTTP Handler（省略） ---
-// ... 既存のコードをそのまま利用 ...
+// --- HTTP Handler for Vercel ---
+module.exports = async (req, res) => {
+    // CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+  
+    try {
+        let body = {};
+        if (req.method === 'POST') {
+            body = typeof req.body === 'object' ? req.body : (req.body ? JSON.parse(req.body) : {});
+        }
+    
+        const userId = body.userId || req.query.userId || 'anon';
+        const message = body.message || req.query.message;
+    
+        if (!message) {
+            return res.status(400).json({ error: 'message is required.' });
+        }
+    
+        const start = Date.now();
+        const result = await getBotResponse(userId, message);
+        const took_ms = Date.now() - start;
+    
+        res.status(200).json({
+            reply: result.text,
+            meta: { took_ms }
+        });
+    } catch (err) {
+        console.error('Handler error:', err && err.stack ? err.stack : err);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
