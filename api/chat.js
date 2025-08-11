@@ -1,5 +1,3 @@
-// api/chat.js
-// 完全版 — Kuromoji + fetchフォールバック + Wikipedia/DDG/Weather/Joke/Advice + エコーガード + 初回ウェルカム
 const path = require('path');
 const fs = require('fs');
 
@@ -81,7 +79,8 @@ function getCompoundKeywordsFromTokens(tokens){
     else pushBuf();
   }
   pushBuf();
-  return Array.from(new Set(keywords)).sort((a,b)=>b.length-b.length);
+  // 修正版：キーワードを文字数の降順でソート
+  return Array.from(new Set(keywords)).sort((a, b) => b.length - a.length);
 }
 
 // ---- コア参照（簡易） ----
@@ -367,7 +366,7 @@ module.exports = async (req, res) => {
     let wantInit = false;
 
     if (req.method === 'POST') {
-      userId = body && body.userId ? String(body.userId) : (body && body.user && body.user.id ? String(body.user.id) : null);
+      userId = body && body.userId ? String(body.userId) : (body && body.user && body.user.id ? String(body.user.id) : 'anon');
       message = (typeof body.message !== 'undefined') ? (body.message === null ? '' : String(body.message)) : null;
       wantInit = !!body.init;
     } else {
