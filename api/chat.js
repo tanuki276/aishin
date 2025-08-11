@@ -414,4 +414,41 @@ module.exports = async (req, res) => {
 
     if (isEchoMessage(userId, message)) {
       console.log('Ignored echo message for userId=', userId);
-      const resp = { reply: '', text: '', ignored: true, reason: 'echo
+      const resp = { reply: '', text: '', ignored: true, reason: 'echo' };
+      return res.status(200).json(resp);
+    }
+
+    if (wantInit) {
+      const welcome = '何か質問はありますか？';
+      const now = nowTs();
+      const ctx = contextMap.get(userId) || { history: [], persona: 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
+      pushHistory(ctx, 'bot', welcome);
+      contextMap.set(userId, ctx);
+      return res.status(200).json({ reply: welcome, text: welcome, meta: { welcome: true } });
+    }
+
+    if (!message) {
+      return res.status(400).json({
+        reply: '',
+        text: '',
+        error: 'message (or q) is required. To get welcome, provide init=true or send a message.'
+      });
+    }
+
+    const start = Date.now();
+    const result = await getBotResponse(userId, message, { persona: req.query && req.query.persona ? req.query.persona : undefined });
+    const took = Date.now() - start;
+    const replyText = result && result.text ? result.text : 'すみません、応答できませんでした。';
+    const responseBody = {
+      reply: replyText,
+      text: replyText,
+      meta: result && result.meta ? result.meta : {},
+      took_ms: took
+    };
+    return res.status(200).json(responseBody);
+
+  } catch (err) {
+    console.error('handler error', err && err.stack ? err.stack : err);
+    return res.status(500).json({ reply: '', text: '', error: 'Internal Server Error', detail: err && err.message ? err.message : String(err) });
+  }
+};
