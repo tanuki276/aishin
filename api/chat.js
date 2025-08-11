@@ -52,7 +52,8 @@ const initTokenizer = (async () => {
 // ---- コンテキスト/履歴（メモリ） ----
 const contextMap = new Map();
 const MAX_HISTORY = 80;
-const CONTEXT_TTL_MS = 1000 * 60 * 60 * 6; // 6時間
+// タイムアウト時間を15分に短縮
+const CONTEXT_TTL_MS = 1000 * 60 * 15; 
 
 function nowTs(){ return Date.now(); }
 function pushHistory(ctx, role, text){
@@ -216,6 +217,7 @@ const smalltalkPools = {
 };
 function smalltalk(mode='neutral'){ return choose(smalltalkPools[mode] || smalltalkPools.neutral); }
 
+
 // ---- 応答ロジック ----
 async function getBotResponse(userId, userMessage, opts = {}){
   await initTokenizer;
@@ -224,6 +226,20 @@ async function getBotResponse(userId, userMessage, opts = {}){
   let ctx = contextMap.get(userId);
   if (!ctx || (now - (ctx.updatedAt || 0) > CONTEXT_TTL_MS)) {
     ctx = { history: [], persona: opts.persona || 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
+  }
+
+  // 新しい話題への移行をチェック (修正点)
+  let isNewTopic = false;
+  if (ctx.lastKeyword) {
+    let currentKeywords = getCompoundKeywordsFromTokens(tokenizer.tokenize(userMessage));
+    // 過去のキーワードと現在のキーワードが一致しない、または全く関連性がない場合
+    if (!currentKeywords.some(k => ctx.lastKeyword.includes(k) || k.includes(ctx.lastKeyword))) {
+      isNewTopic = true;
+    }
+  }
+  if (isNewTopic) {
+      console.log('Detected new topic. Resetting context for userId=', userId);
+      ctx = { history: [], persona: opts.persona || 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
   }
 
   pushHistory(ctx, 'user', userMessage);
@@ -398,41 +414,4 @@ module.exports = async (req, res) => {
 
     if (isEchoMessage(userId, message)) {
       console.log('Ignored echo message for userId=', userId);
-      const resp = { reply: '', text: '', ignored: true, reason: 'echo' };
-      return res.status(200).json(resp);
-    }
-
-    if (wantInit) {
-      const welcome = '何か質問はありますか？';
-      const now = nowTs();
-      const ctx = contextMap.get(userId) || { history: [], persona: 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
-      pushHistory(ctx, 'bot', welcome);
-      contextMap.set(userId, ctx);
-      return res.status(200).json({ reply: welcome, text: welcome, meta: { welcome: true } });
-    }
-
-    if (!message) {
-      return res.status(400).json({
-        reply: '',
-        text: '',
-        error: 'message (or q) is required. To get welcome, provide init=true or send a message.'
-      });
-    }
-
-    const start = Date.now();
-    const result = await getBotResponse(userId, message, { persona: req.query && req.query.persona ? req.query.persona : undefined });
-    const took = Date.now() - start;
-    const replyText = result && result.text ? result.text : 'すみません、応答できませんでした。';
-    const responseBody = {
-      reply: replyText,
-      text: replyText,
-      meta: result && result.meta ? result.meta : {},
-      took_ms: took
-    };
-    return res.status(200).json(responseBody);
-
-  } catch (err) {
-    console.error('handler error', err && err.stack ? err.stack : err);
-    return res.status(500).json({ reply: '', text: '', error: 'Internal Server Error', detail: err && err.message ? err.message : String(err) });
-  }
-};
+      const resp = { reply: '', text: '', ignored: true, reason: 'echo
