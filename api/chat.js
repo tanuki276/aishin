@@ -1,279 +1,406 @@
+ handler）
 const path = require('path');
 const fs = require('fs');
 
-let fetchImpl = global.fetch;
+// ---- fetch フォールバック ----
+let fetchImpl = (typeof globalThis !== 'undefined' && globalThis.fetch) ? globalThis.fetch : null;
 if (!fetchImpl) {
   try {
-    fetchImpl = require('node-fetch');
-  } catch (e) {
-    console.warn('global.fetch not found and node-fetch not installed. External fetch will fail.');
+    const nf = require('node-fetch');
+    fetchImpl = nf.default || nf;
+  } catch (e1) {
+    try {
+      const undici = require('undici');
+      fetchImpl = undici.fetch;
+    } catch (e2) {
+      console.warn('fetch not available: network calls will fail unless global.fetch / node-fetch / undici present.');
+      fetchImpl = null;
+    }
   }
 }
 
+// ---- kuromoji 初期化（node_modules の dict を使う） ----
 const kuromoji = require('kuromoji');
 let tokenizer = null;
-let initTokenizer = (async () => {
+const initTokenizer = (async () => {
   try {
-    // kuromojiの内蔵辞書パスを使用
     const dictPath = path.join(
       path.dirname(require.resolve('kuromoji')),
       '..',
       'dict'
     );
-
     await new Promise((resolve, reject) => {
       kuromoji.builder({ dicPath: dictPath }).build((err, built) => {
-        if (err) {
-          console.error('Kuromoji init failed:', err);
-          reject(err);
-          return;
-        }
+        if (err) return reject(err);
         tokenizer = built;
-        console.log('Kuromoji ready');
+        console.log('Kuromoji ready (dictPath=', dictPath, ')');
         resolve();
       });
     });
   } catch (err) {
     console.error('initTokenizer error:', err);
-    throw err;
+    // tokenizer stays null but we don't throw here to allow degraded service
   }
 })();
 
+// ---- コンテキスト/履歴 ----
 const contextMap = new Map();
-const MAX_HISTORY = 40;
-const CONTEXT_TTL_MS = 1000 * 60 * 60 * 3;
+const MAX_HISTORY = 80;
+const CONTEXT_TTL_MS = 1000 * 60 * 60 * 6; // 6時間
 
-function nowTs() { return Date.now(); }
-
-function pushHistory(ctx, role, text) {
+function nowTs(){ return Date.now(); }
+function pushHistory(ctx, role, text){
   ctx.history.push({ role, text, ts: nowTs() });
   if (ctx.history.length > MAX_HISTORY) ctx.history.shift();
   ctx.updatedAt = nowTs();
 }
+function choose(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 
-function choose(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-function detectIntent(text) {
+// ---- 実用的なインテント判定 ----
+function detectIntent(text){
   if (!text) return 'unknown';
-  const t = text.toLowerCase();
-  if (['こんにちは','こんばんは','おはよう','やあ','おっす'].some(w => text.includes(w))) return 'greeting';
-  if (['ありがとう','感謝','助かった','サンキュー','thanks'].some(w => t.includes(w))) return 'thanks';
-  if (/^(hi|hello|hey)\b/.test(t)) return 'greeting';
+  if (/^(おはよう|こんにちは|こんばんは|やあ|もしもし|おっす)/.test(text)) return 'greeting';
+  if (/ありがとう|助かった|感謝/.test(text)) return 'thanks';
+  if (/(天気|気温|降水|雨|晴れ)/.test(text)) return 'weather';
+  if (/ジョーク|おもしろ|笑わせて|ネタ/.test(text)) return 'joke';
+  if (/助言|アドバイス|どうすれば|どうしたら/.test(text)) return 'advice';
+  if (/\?|\？|かな|かも|だろう/.test(text)) return 'question';
   return 'unknown';
 }
 
-function getCompoundKeywordsFromTokens(tokens) {
+// ---- 形態素処理から複合キーワード抽出 ----
+function getCompoundKeywordsFromTokens(tokens){
   const keywords = [];
   let buf = [];
-  const pushBuf = () => { if (buf.length) { keywords.push(buf.join('')); buf = []; } };
-
-  for (const t of tokens) {
+  const pushBuf = ()=>{ if (buf.length){ keywords.push(buf.join('')); buf = []; } };
+  for (const t of tokens){
     const sf = t.surface_form || '';
     const isNoun = t.pos === '名詞';
     const isProper = t.pos_detail_1 === '固有名詞';
     const isKatakana = /^[\u30A0-\u30FF]+$/.test(sf);
     const isAlphaNum = /^[A-Za-z0-9\-\_]+$/.test(sf);
     const isAllowed = (isNoun || isKatakana || isAlphaNum || isProper) && t.pos_detail_1 !== '代名詞';
-
-    if (isAllowed) {
-      buf.push(sf);
-    } else {
-      pushBuf();
-    }
+    if (isAllowed) buf.push(sf);
+    else pushBuf();
   }
   pushBuf();
-
-  return Array.from(new Set(keywords)).sort((a,b)=>b.length-a.length);
+  return Array.from(new Set(keywords)).sort((a,b)=>b.length-b.length);
 }
 
-function resolveCoref(text, ctx) {
+// ---- コア参照（簡易） ----
+function resolveCoref(text, ctx){
   if (!text) return null;
   const pronouns = ['それ','あれ','これ','ここ','そこ','あそこ','この','その','あの'];
   if (!pronouns.some(p => text.includes(p))) return null;
-
   const m = text.match(/(この|その|あの)([^\s　]+)/);
-  if (m) {
+  if (m){
     const noun = m[2];
-    if (ctx && ctx.lastEntities && ctx.lastEntities.length) {
-      for (const e of ctx.lastEntities) {
-        if (e.title.includes(noun) || e.title === noun) return e.title;
-      }
+    if (ctx && ctx.lastEntities && ctx.lastEntities.length){
+      for (const e of ctx.lastEntities) if (e.title.includes(noun) || e.title === noun) return e.title;
     }
     return noun;
   }
-
   if (ctx && ctx.lastEntities && ctx.lastEntities.length) return ctx.lastEntities[0].title;
   if (ctx && ctx.lastKeyword) return ctx.lastKeyword;
   return null;
 }
 
-async function searchWikipediaBestMatch(keyword) {
-  if (!fetchImpl) {
-    console.error('fetch not available');
-    return { found: false };
-  }
+// ---- Wikipedia (ja) 検索（OpenSearch -> summary） ----
+async function tryWikipedia(keyword){
+  if (!fetchImpl || !keyword) return null;
   try {
-    const opensearchUrl = `https://ja.wikipedia.org/w/api.php?action=opensearch&limit=5&format=json&origin=*&search=${encodeURIComponent(keyword)}`;
-    const opRes = await fetchImpl(opensearchUrl);
+    const opUrl = `https://ja.wikipedia.org/w/api.php?action=opensearch&limit=5&format=json&origin=*&search=${encodeURIComponent(keyword)}`;
+    const opRes = await fetchImpl(opUrl);
+    if (!opRes.ok) return null;
     const opJson = await opRes.json();
-    const candidates = (opJson && opJson[1]) ? opJson[1] : [];
-
-    for (const title of candidates) {
-      const extractUrl = `https://ja.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&format=json&origin=*&titles=${encodeURIComponent(title)}`;
-      const exRes = await fetchImpl(extractUrl);
-      const exJson = await exRes.json();
-      if (!exJson || !exJson.query || !exJson.query.pages) continue;
-      const pages = exJson.query.pages;
-      const pageId = Object.keys(pages)[0];
-      if (pageId === '-1') continue;
-      const page = pages[pageId];
-      if (!page || !page.extract) continue;
-      return { found: true, title: page.title, extract: page.extract, pageid: pageId };
+    const titles = opJson && opJson[1] ? opJson[1] : [];
+    for (const t of titles){
+      // REST summary の方が扱いやすい
+      const sumUrl = `https://ja.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(t)}`;
+      const sres = await fetchImpl(sumUrl);
+      if (!sres.ok) continue;
+      const sjson = await sres.json();
+      if (sjson && sjson.extract){
+        const text = (sjson.extract.length > 600) ? sjson.extract.substring(0,600) + '...' : sjson.extract;
+        return { source: 'wikipedia', title: sjson.title, text };
+      }
     }
-    return { found: false };
   } catch (err) {
-    console.error('searchWikipediaBestMatch error:', err);
-    return { found: false, error: err.message || String(err) };
+    console.warn('tryWikipedia error', err && err.message);
   }
+  return null;
 }
 
-function renderReplyFromWiki(title, extract) {
-  if (!extract) return null;
-  let summary = extract.replace(/\n+/g, ' ').trim();
-  const maxLen = 360;
-  if (summary.length > maxLen) summary = summary.substring(0, maxLen) + '...';
-
-  const intro = choose([
-    `お調べしました：「${title}」についてです。`,
-    `はい、「${title}」ですね。概要は次の通りです。`,
-    `なるほど、「${title}」についてですね。`
-  ]);
-  const outro = choose([
-    'さらに詳しく知りたいですか？',
-    '他にも関連することを調べますか？',
-    'ここまでで大丈夫ですか？'
-  ]);
-  const smalltalk = choose(['','（ちなみに面白い事実として…）','']);
-
-  return `${intro}${summary}${smalltalk} ${outro}`;
-}
-
-function getFallbackResponse() {
-  return choose([
-    'すみません、うまく応答できませんでした。別の言い方で試してもらえますか？',
-    'ちょっと情報が見つかりませんでした。もう少し詳しく教えてください。',
-    '申し訳ないですが、その内容に関しては今は分かりません。'
-  ]);
-}
-
-async function getBotResponse(userId, userMessage) {
+// ---- DuckDuckGo Instant Answer (英語/多言語補助) ----
+async function tryDuckDuckGo(q){
+  if (!fetchImpl || !q) return null;
   try {
-    await initTokenizer;
+    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skipsdisambig=1`;
+    const res = await fetchImpl(url);
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (j.AbstractText && j.AbstractText.length) {
+      const txt = j.AbstractText.length > 600 ? j.AbstractText.substring(0,600)+'...' : j.AbstractText;
+      return { source: 'duckduckgo', title: j.Heading || q, text: txt };
+    }
   } catch (err) {
-    console.error('Tokenizer init failed in getBotResponse:', err);
-    return '申し訳ありません。内部の準備ができていません。';
+    // ignore
   }
+  return null;
+}
 
-  if (!tokenizer) {
-    console.error('tokenizer is null');
-    return '申し訳ありません。形態素解析が利用できません。';
-  }
+// ---- ジョーク（Official Joke API） ----
+async function getJoke(){
+  if (!fetchImpl) return null;
+  try {
+    const res = await fetchImpl('https://official-joke-api.appspot.com/random_joke');
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (j && j.setup) return { source: 'joke', text: `${j.setup} — ${j.punchline || ''}`.trim() };
+  } catch(e){ }
+  // fallback: Advice Slip をジョーク代用
+  try {
+    const r2 = await fetchImpl('https://api.adviceslip.com/advice');
+    if (r2.ok){
+      const a = await r2.json();
+      if (a && a.slip && a.slip.advice) return { source: 'advice-slip', text: a.slip.advice };
+    }
+  } catch(e){}
+  return null;
+}
 
+// ---- アドバイス（Advice Slip） ----
+async function getAdvice(){
+  if (!fetchImpl) return null;
+  try {
+    const res = await fetchImpl('https://api.adviceslip.com/advice');
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (j && j.slip && j.slip.advice) return { source: 'advice', text: j.slip.advice };
+  } catch(e){}
+  return null;
+}
+
+// ---- 天気（Nominatim を使ったジオコーディング + Open-Meteo） ----
+async function getWeatherForPlace(place){
+  if (!fetchImpl || !place) return null;
+  try {
+    // Nominatim geocoding
+    const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(place)}&limit=1`;
+    const nom = await fetchImpl(nomUrl, { headers: { 'User-Agent': 'vercel-chat-example/1.0' }});
+    if (!nom.ok) return null;
+    const nomj = await nom.json();
+    if (!nomj || !nomj[0]) return null;
+    const lat = parseFloat(nomj[0].lat), lon = parseFloat(nomj[0].lon), display = nomj[0].display_name;
+    // Open-Meteo current weather
+    const meto = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&timezone=auto`;
+    const mres = await fetchImpl(meto);
+    if (!mres.ok) return null;
+    const mj = await mres.json();
+    if (mj && mj.current_weather) {
+      const cw = mj.current_weather;
+      const text = `${display} の現在の天気: ${cw.weathercode || ''}、気温 ${cw.temperature}°C、風速 ${cw.windspeed} m/s（取得元: Open-Meteo）`;
+      return { source: 'open-meteo', text, meta: { lat, lon } };
+    }
+  } catch(e){ console.warn('getWeatherForPlace error', e && e.message); }
+  return null;
+}
+
+// ---- 雑談・トーン ----
+const smalltalkPools = {
+  neutral: [
+    'ふむ、なるほどね。',
+    'へえ、そうなんだ！',
+    '面白いね。もっと聞かせて？',
+    'いいね、その話。'
+  ],
+  snarky: [
+    'そう？でも本気で言ってるの？',
+    'おや、それは意外（としか言えない）',
+    'ふーん、君は勇気あるね。'
+  ],
+  kind: [
+    'いいね、よくやったね。',
+    '素敵な話だね。ありがとう。',
+    'そういうの聞けて嬉しいよ。'
+  ]
+};
+function smalltalk(mode='neutral'){ return choose(smalltalkPools[mode]||smalltalkPools.neutral); }
+
+// ---- メイン応答ロジック ----
+async function getBotResponse(userId, userMessage, opts = {}){
+  await initTokenizer; // ensure tokenizer init attempted
+
+  // context
   const now = nowTs();
   let ctx = contextMap.get(userId);
   if (!ctx || (now - (ctx.updatedAt || 0) > CONTEXT_TTL_MS)) {
-    ctx = { history: [], lastKeyword: null, lastEntities: [], updatedAt: now };
+    ctx = { history: [], persona: opts.persona || 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
   }
   pushHistory(ctx, 'user', userMessage);
 
+  // quick intents
   const intent = detectIntent(userMessage);
-  if (intent === 'greeting') {
-    const r = choose(['こんにちは！何を調べる？','やあ、どうしたい？','おっす！教えてください。']);
-    pushHistory(ctx, 'bot', r);
-    contextMap.set(userId, ctx);
-    return r;
+
+  if (intent === 'greeting'){
+    const r = choose(['こんにちは！今日どうする？','やあ！何か知りたい？','おっす、調べ・雑談どっちがいい？']);
+    pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx); return { text: r, meta:{mode:'greeting'} };
   }
-  if (intent === 'thanks') {
-    const r = choose(['どういたしまして！','また聞いてね。']);
-    pushHistory(ctx, 'bot', r);
-    contextMap.set(userId, ctx);
-    return r;
+  if (intent === 'thanks'){
+    const r = choose(['どういたしまして！','いつでも聞いてね。']);
+    pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx); return { text: r, meta:{mode:'thanks'} };
   }
 
+  // tokenize
   let tokens = [];
-  try {
-    tokens = tokenizer.tokenize(userMessage);
-  } catch (e) {
-    console.error('tokenize error:', e);
+  if (tokenizer){
+    try { tokens = tokenizer.tokenize(userMessage); } catch(e){ console.warn('tokenize failed', e && e.message); }
   }
 
   const coref = resolveCoref(userMessage, ctx);
   const extracted = getCompoundKeywordsFromTokens(tokens);
-
   const candidates = [];
   if (coref) candidates.push(coref);
   for (const k of extracted) if (!candidates.includes(k)) candidates.push(k);
-  if (ctx.lastEntities && ctx.lastEntities.length) {
+  if (ctx.lastEntities && ctx.lastEntities.length){
     for (const e of ctx.lastEntities) if (!candidates.includes(e.title)) candidates.push(e.title);
   }
 
-  console.log('[getBotResponse] userId=', userId, 'candidates=', candidates);
+  console.log('[getBotResponse] userId=', userId, 'intent=', intent, 'candidates=', candidates);
 
-  for (const cand of candidates) {
-    if (!cand || String(cand).trim().length === 0) continue;
-    try {
-      const wiki = await searchWikipediaBestMatch(cand);
-      console.log('[getBotResponse] wiki result for', cand, wiki && wiki.found);
-      if (wiki && wiki.found) {
+  // 1) 天気要求なら天気APIを試す（キーワードから地名を推定）
+  if (intent === 'weather' || /天気|気温|雨|晴れ|降水/.test(userMessage)){
+    // try candidate place names first
+    for (const cand of candidates){
+      if (!cand) continue;
+      const w = await getWeatherForPlace(cand);
+      if (w){
         ctx.lastKeyword = cand;
-        ctx.lastEntities.unshift({ title: wiki.title, ts: now });
-        if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
-
-        const reply = renderReplyFromWiki(wiki.title, wiki.extract);
+        ctx.lastEntities.unshift({ title: cand, ts: now });
+        if (ctx.lastEntities.length>10) ctx.lastEntities.pop();
+        const reply = w.text + ' 何か他に知りたい？';
         pushHistory(ctx, 'bot', reply);
         contextMap.set(userId, ctx);
-        return reply;
+        return { text: reply, meta: {source:w.source, usedKeyword:cand} };
       }
-    } catch (err) {
-      console.error('Error when searching wiki for', cand, err);
+    }
+    // fallback: try to parse a place token from message (simple)
+    const placeMatch = userMessage.match(/([^\s　]+市|都|道|府|県|町|村|区|東京|大阪|京都)/);
+    if (placeMatch){
+      const w2 = await getWeatherForPlace(placeMatch[0]);
+      if (w2){
+        const reply = w2.text + ' 何か他に知りたい？';
+        pushHistory(ctx,'bot',reply); contextMap.set(userId,ctx);
+        return { text: reply, meta: {source:w2.source, usedKeyword:placeMatch[0]} };
+      }
+    }
+    // couldn't get weather
+    const r = 'ごめん、場所の特定ができなかったか、天気情報を取得できませんでした。地名を教えてもらえる？';
+    pushHistory(ctx,'bot',r); contextMap.set(userId, ctx);
+    return { text: r, meta: { mode: 'weather-failed' } };
+  }
+
+  // 2) ジョーク / 励まし / アドバイス系
+  if (intent === 'joke'){
+    const j = await getJoke();
+    if (j){ pushHistory(ctx,'bot',j.text); contextMap.set(userId,ctx); return { text: j.text, meta:{source:j.source} }; }
+  }
+  if (intent === 'advice'){
+    const a = await getAdvice();
+    if (a){ pushHistory(ctx,'bot',a.text); contextMap.set(userId,ctx); return { text: a.text, meta:{source:a.source} }; }
+  }
+
+  // 3) Wikipedia / DuckDuckGo 検索（固有名詞・名詞があれば）
+  for (const cand of candidates){
+    if (!cand || String(cand).trim().length===0) continue;
+    // Wikipedia優先（日本語）
+    const wiki = await tryWikipedia(cand);
+    if (wiki){
+      ctx.lastKeyword = cand;
+      ctx.lastEntities.unshift({ title: wiki.title, ts: now });
+      if (ctx.lastEntities.length>10) ctx.lastEntities.pop();
+      const reply = `お調べしました：「${wiki.title}」 — ${wiki.text} 他にも知りたい？`;
+      pushHistory(ctx,'bot',reply); contextMap.set(userId,ctx);
+      return { text: reply, meta: {source: wiki.source, title: wiki.title} };
+    }
+    // DuckDuckGo（汎用）
+    const ddg = await tryDuckDuckGo(cand);
+    if (ddg){
+      ctx.lastKeyword = cand;
+      ctx.lastEntities.unshift({ title: ddg.title, ts: now });
+      if (ctx.lastEntities.length>10) ctx.lastEntities.pop();
+      const reply = `ちょっと調べたら：「${ddg.title}」 — ${ddg.text}。どうする？`;
+      pushHistory(ctx,'bot',reply); contextMap.set(userId,ctx);
+      return { text: reply, meta: {source: ddg.source, title: ddg.title} };
     }
   }
 
-  let clarifying = '';
-  if (extracted && extracted.length) {
-    clarifying = `「${extracted[0]}」についてでしょうか？ もう少し詳しく（例: どの時代の、どの国の、人物ならどの職業の）を教えてください。`;
-  } else if (ctx.lastEntities && ctx.lastEntities.length) {
-    clarifying = `さっきの「${ctx.lastEntities[0].title}」の続きですか？それとも別の話題に移りますか？`;
-  } else {
-    clarifying = getFallbackResponse();
+  // 4) 質問っぽいなら一般応答（雑談を豊かに）
+  if (intent === 'question' || /どう|なぜ|なに|どの|いつ|どこ/.test(userMessage)){
+    // Try one last wide search with the whole message
+    const ddgWhole = await tryDuckDuckGo(userMessage);
+    if (ddgWhole){
+      const r = `${ddgWhole.title} に関する情報です： ${ddgWhole.text} もっと詳しく？`;
+      pushHistory(ctx,'bot',r); contextMap.set(userId,ctx);
+      return { text: r, meta:{source: ddgWhole.source} };
+    }
+    // fallback: intelligent smalltalk-like answer
+    const fallbackQ = choose([
+      'いい質問だね…少し考えさせて。',
+      'その点については色々な見方があるよ。具体的にはどの部分が気になる？',
+      'なるほど、もう少し背景を教えてくれる？'
+    ]);
+    pushHistory(ctx,'bot',fallbackQ); contextMap.set(userId,ctx);
+    return { text: fallbackQ, meta:{mode:'clarify'} };
   }
 
-  pushHistory(ctx, 'bot', clarifying);
-  contextMap.set(userId, ctx);
-  return clarifying;
+  // 5) 雑談（最後の砦）
+  const persona = ctx.persona || 'neutral';
+  const s = smalltalk(persona);
+  pushHistory(ctx,'bot',s); contextMap.set(userId,ctx);
+  return { text: s, meta:{mode:'smalltalk', persona} };
 }
 
-const handler = async (req, res) => {
+// ---- Vercel / serverless handler ----
+module.exports = async (req, res) => {
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   try {
-    const { userId, message } = req.body || {};
-    if (!userId || !message) {
-      return res.status(400).json({ error: 'userId and message are required' });
+    // accept JSON body (POST) or query param (GET)
+    let userId = null;
+    let message = null;
+    if (req.method === 'POST') {
+      const body = typeof req.body === 'object' ? req.body : (req.body ? JSON.parse(req.body) : {});
+      userId = body && body.userId ? String(body.userId) : (body && body.user && body.user.id ? String(body.user.id) : null);
+      message = body && body.message ? String(body.message) : null;
+    } else {
+      // GET fallback for quick test
+      userId = req.query && req.query.userId ? String(req.query.userId) : (req.query && req.query.user ? String(req.query.user) : 'anon');
+      message = req.query && req.query.message ? String(req.query.message) : req.query.q || null;
     }
 
-    const botText = await getBotResponse(String(userId), String(message));
-    return res.status(200).json({ response: botText });
+    if (!message) return res.status(400).json({ error: 'message (or q) is required' });
+    if (!userId) userId = 'anon';
+
+    const start = Date.now();
+    const result = await getBotResponse(userId, message, { persona: req.query && req.query.persona ? req.query.persona : undefined });
+    const took = Date.now() - start;
+
+    // normalized response
+    const responseBody = {
+      reply: result && result.text ? result.text : 'すみません、応答できませんでした。',
+      meta: result.meta || {},
+      took_ms: took
+    };
+    return res.status(200).json(responseBody);
 
   } catch (err) {
-    console.error('API handler error:', err);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    console.error('handler error', err && err.stack ? err.stack : err);
+    return res.status(500).json({ error: 'Internal Server Error', detail: err && err.message ? err.message : String(err) });
   }
 };
-
-module.exports = handler;
