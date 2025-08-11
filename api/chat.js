@@ -419,4 +419,6 @@ module.exports = async (req, res) => {
     }
 
     // if no message provided (and not init), complain
-    if (!message) return res.status(400).json({ error: 'message (or q) is required. To get welcome
+    if (!message) {
+  return res.status(400).json({ error: 'message (or q) is required. To get welcome, please provide the message.' });
+}
