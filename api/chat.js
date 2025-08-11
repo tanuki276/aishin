@@ -1,5 +1,7 @@
 const path = require('path');
 const fs = require('fs');
+const kuromoji = require('kuromoji');
+const fetch = require('node-fetch');
 
 // --- data.json から知識ベースを読み込む ---
 const dataPath = path.join(__dirname, 'data.json');
@@ -12,6 +14,10 @@ try {
   console.error('Failed to load data.json:', error.message);
 }
 // ----------------------------------------
+
+// ---- APIキーの設定 (重要: 環境変数から読み込むことを推奨) ----
+const SPOONACULAR_API_KEY = process.env.SPOONACULAR_API_KEY || 'YOUR_SPOONACULAR_API_KEY';
+const WOLFRAM_ALPHA_APP_ID = process.env.WOLFRAM_ALPHA_APP_ID || 'YOUR_WOLFRAM_ALPHA_APP_ID';
 
 // ---- fetch フォールバック ----
 let fetchImpl = (typeof globalThis !== 'undefined' && globalThis.fetch) ? globalThis.fetch : null;
@@ -31,7 +37,6 @@ if (!fetchImpl) {
 }
 
 // ---- kuromoji 初期化（node_modules の dict を使う） ----
-const kuromoji = require('kuromoji');
 let tokenizer = null;
 const initTokenizer = (async () => {
   try {
@@ -39,7 +44,7 @@ const initTokenizer = (async () => {
     await new Promise((resolve, reject) => {
       kuromoji.builder({ dicPath: dictPath }).build((err, built) => {
         if (err) return reject(err);
-        tokenizer = tokenizer = built;
+        tokenizer = built;
         console.log('Kuromoji ready (dictPath=', dictPath, ')');
         resolve();
       });
@@ -52,8 +57,7 @@ const initTokenizer = (async () => {
 // ---- コンテキスト/履歴（メモリ） ----
 const contextMap = new Map();
 const MAX_HISTORY = 80;
-// タイムアウト時間を30分に延長
-const CONTEXT_TTL_MS = 1000 * 60 * 30; 
+const CONTEXT_TTL_MS = 1000 * 60 * 30;
 
 function nowTs(){ return Date.now(); }
 function pushHistory(ctx, role, text){
@@ -71,7 +75,9 @@ function detectIntent(text){
   if (/(天気|気温|降水|雨|晴れ)/.test(text)) return 'weather';
   if (/(ジョーク|冗談|ギャグ|おもしろ|笑わせて|ネタ)/.test(text)) return 'joke';
   if (/助言|アドバイス|どうすれば|どうしたら/.test(text)) return 'advice';
-  if (/(作り方|レシピ|材料)/.test(text)) return 'recipe'; // 新しいインテントを追加
+  if (/(作り方|レシピ|材料|献立|調理法)/.test(text)) return 'recipe';
+  // 数学的なキーワードや記号をチェック
+  if (/[+\-*/^=]/.test(text) || /(計算|平方根|微分|積分|方程式|解)/.test(text)) return 'math';
   if (/\?|\？|かな|かも|だろう/.test(text)) return 'question';
   return 'unknown';
 }
@@ -87,13 +93,11 @@ function getCompoundKeywordsFromTokens(tokens){
     const isProper = t.pos_detail_1 === '固有名詞';
     const isKatakana = /^[\u30A0-\u30FF]+$/.test(sf);
     const isAlphaNum = /^[A-Za-z0-9\-\_]+$/.test(sf);
-    // 助詞「の」「は」も連結対象とする
     const isAllowed = (isNoun || isKatakana || isAlphaNum || isProper) || (t.pos === '助詞' && (sf === 'の' || sf === 'は'));
     if (isAllowed) buf.push(sf);
     else pushBuf();
   }
   pushBuf();
-  // 連結されたキーワードをソートし、文字数が1以下のものを除外
   return Array.from(new Set(keywords.filter(k => k.length > 1))).sort((a, b) => b.length - a.length);
 }
 
@@ -152,9 +156,41 @@ async function tryDuckDuckGo(q){
       const txt = j.AbstractText.length > 600 ? j.AbstractText.substring(0,600)+'...' : j.AbstractText;
       return { source: 'duckduckgo', title: j.Heading || q, text: txt };
     }
-  } catch (err) {
-    // ignore
-  }
+  } catch (err) { /* ignore */ }
+  return null;
+}
+
+// ---- レシピ検索 (Spoonacular) ----
+async function trySpoonacular(query){
+  if (!fetchImpl || !query || !SPOONACULAR_API_KEY) return null;
+  try {
+    const url = `https://api.spoonacular.com/recipes/complexSearch?apiKey=${SPOONACULAR_API_KEY}&query=${encodeURIComponent(query)}&number=1&addRecipeInformation=true`;
+    const res = await fetchImpl(url);
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (j && j.results && j.results.length > 0) {
+      const recipe = j.results[0];
+      const ingredients = recipe.extendedIngredients ? recipe.extendedIngredients.map(i => i.name).join('、') : '情報なし';
+      const instructions = recipe.analyzedInstructions && recipe.analyzedInstructions.length > 0 ? recipe.analyzedInstructions[0].steps.map(s => `${s.number}. ${s.step}`).join('\n') : '手順情報なし';
+      const reply = `「${recipe.title}」のレシピをお探しですね。\n材料: ${ingredients}\n手順:\n${instructions}`;
+      return { source: 'spoonacular', title: recipe.title, text: reply };
+    }
+  } catch(e){ console.warn('trySpoonacular error', e && e.message ? e.message : e); }
+  return null;
+}
+
+// ---- 数学計算 (WolframAlpha) ----
+async function tryWolframAlpha(query){
+  if (!fetchImpl || !query || !WOLFRAM_ALPHA_APP_ID) return null;
+  try {
+    const url = `https://api.wolframalpha.com/v2/result?i=${encodeURIComponent(query)}&appid=${WOLFRAM_ALPHA_APP_ID}&output=json&units=metric&includepodid=Result`;
+    const res = await fetchImpl(url);
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (j && j.Result) {
+      return { source: 'wolframalpha', title: query, text: j.Result };
+    }
+  } catch(e){ console.warn('tryWolframAlpha error', e && e.message ? e.message : e); }
   return null;
 }
 
@@ -167,13 +203,6 @@ async function getJoke(){
     const j = await res.json();
     if (j && j.setup) return { source: 'joke', text: `${j.setup} — ${j.punchline || ''}`.trim() };
   } catch(e){ }
-  try {
-    const r2 = await fetchImpl('https://api.adviceslip.com/advice');
-    if (r2.ok){
-      const a = await r2.json();
-      if (a && a.slip && a.slip.advice) return { source: 'advice-slip', text: a.slip.advice };
-    }
-  } catch(e){}
   return null;
 }
 
@@ -218,7 +247,6 @@ const smalltalkPools = {
 };
 function smalltalk(mode='neutral'){ return choose(smalltalkPools[mode] || smalltalkPools.neutral); }
 
-
 // ---- 応答ロジック ----
 async function getBotResponse(userId, userMessage, opts = {}){
   await initTokenizer;
@@ -229,11 +257,9 @@ async function getBotResponse(userId, userMessage, opts = {}){
     ctx = { history: [], persona: opts.persona || 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
   }
 
-  // 新しい話題への移行をチェック (修正点)
   let isNewTopic = false;
   if (ctx.lastKeyword) {
     let currentKeywords = getCompoundKeywordsFromTokens(tokenizer.tokenize(userMessage));
-    // 過去のキーワードと現在のキーワードが一致しない、または全く関連性がない場合
     if (!currentKeywords.some(k => ctx.lastKeyword.includes(k) || k.includes(ctx.lastKeyword))) {
       isNewTopic = true;
     }
@@ -257,61 +283,28 @@ async function getBotResponse(userId, userMessage, opts = {}){
     pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
     return { text: r, meta: { mode: 'thanks' } };
   }
-
-  let tokens = [];
-  if (tokenizer) {
-    try { tokens = tokenizer.tokenize(userMessage); } catch (e) { console.warn('tokenize failed', e && e.message ? e.message : e); }
-  }
-
-  const coref = resolveCoref(userMessage, ctx);
-  const extracted = getCompoundKeywordsFromTokens(tokens);
-
-  // 知識ベースから得られる「ヒント」と複合キーワードの候補を生成
-  const candidates = [];
-  if (coref) candidates.push(coref);
-  for (const k of extracted) {
-    // 複合キーワードが知識ベースに存在する場合、その答えを検索候補として追加
-    if (knowledgeBase[k]) {
-      candidates.push(knowledgeBase[k]);
-    }
-    if (!candidates.includes(k)) {
-      candidates.push(k);
+  
+  // ---- 外部APIを積極的に活用する ----
+  if (intent === 'recipe') {
+    const recipeKeywords = getCompoundKeywordsFromTokens(tokenizer.tokenize(userMessage)).filter(k => !/(作り方|レシピ|材料|献立|調理法)/.test(k));
+    const query = recipeKeywords.length > 0 ? recipeKeywords.join(' ') : userMessage;
+    const recipeResult = await trySpoonacular(query);
+    if (recipeResult) {
+      const reply = `${recipeResult.text} 他にも何か知りたいことはありますか？`;
+      pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+      return { text: reply, meta: { source: 'spoonacular', title: recipeResult.title } };
     }
   }
-  if (ctx.lastEntities && ctx.lastEntities.length) {
-    for (const e of ctx.lastEntities) if (!candidates.includes(e.title)) candidates.push(e.title);
+
+  if (intent === 'math') {
+    const mathResult = await tryWolframAlpha(userMessage);
+    if (mathResult) {
+      const reply = `計算結果は以下の通りです： ${mathResult.text}`;
+      pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+      return { text: reply, meta: { source: 'wolframalpha' } };
+    }
   }
 
-  // weather intent (優先度を上げるため、キーワード検索の前に移動)
-  if (intent === 'weather') {
-    for (const cand of candidates) {
-      if (!cand) continue;
-      const w = await getWeatherForPlace(cand);
-      if (w) {
-        ctx.lastKeyword = cand;
-        ctx.lastEntities.unshift({ title: cand, ts: now });
-        if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
-        const reply = w.text + ' 何か他に知りたい？';
-        pushHistory(ctx, 'bot', reply);
-        contextMap.set(userId, ctx);
-        return { text: reply, meta: { source: w.source, usedKeyword: cand } };
-      }
-    }
-    const placeMatch = userMessage.match(/([^\s　]+市|都|道|府|県|町|村|区|東京|大阪|京都)/);
-    if (placeMatch) {
-      const w2 = await getWeatherForPlace(placeMatch[0]);
-      if (w2) {
-        const reply = w2.text + ' 何か他に知りたい？';
-        pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
-        return { text: reply, meta: { source: w2.source, usedKeyword: placeMatch[0] } };
-      }
-    }
-    const r = 'ごめん、場所の特定ができなかったか、天気情報を取得できませんでした。地名を教えてもらえる？';
-    pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
-    return { text: r, meta: { mode: 'weather-failed' } };
-  }
-
-  // joke / advice intents (優先度を上げる)
   if (intent === 'joke') {
     const j = await getJoke();
     if (j) { pushHistory(ctx, 'bot', j.text); contextMap.set(userId, ctx); return { text: j.text, meta: { source: j.source } }; }
@@ -321,20 +314,38 @@ async function getBotResponse(userId, userMessage, opts = {}){
     if (a) { pushHistory(ctx, 'bot', a.text); contextMap.set(userId, ctx); return { text: a.text, meta: { source: a.source } }; }
   }
 
-  // recipe intent (追加)
-  if (intent === 'recipe') {
-    const recipeKeywords = getCompoundKeywordsFromTokens(tokens).filter(k => k !== '作り方' && k !== 'レシピ');
-    if (recipeKeywords.length > 0) {
-      const mainIngredient = recipeKeywords[0];
-      if (knowledgeBase[mainIngredient] && knowledgeBase[mainIngredient].作り方) {
-        const reply = `${mainIngredient}の作り方ですね。${knowledgeBase[mainIngredient].作り方} 他にも知りたいことはありますか？`;
+  // ---- ローカル知識ベースと一般検索にフォールバック ----
+  let tokens = [];
+  if (tokenizer) {
+    try { tokens = tokenizer.tokenize(userMessage); } catch (e) { /* ignore */ }
+  }
+  const coref = resolveCoref(userMessage, ctx);
+  const extracted = getCompoundKeywordsFromTokens(tokens);
+  const candidates = [];
+  if (coref) candidates.push(coref);
+  for (const k of extracted) {
+    if (knowledgeBase[k]) { candidates.push(knowledgeBase[k]); }
+    if (!candidates.includes(k)) { candidates.push(k); }
+  }
+  if (ctx.lastEntities && ctx.lastEntities.length) {
+    for (const e of ctx.lastEntities) if (!candidates.includes(e.title)) candidates.push(e.title);
+  }
+  
+  if (intent === 'weather') {
+    for (const cand of candidates) {
+      if (!cand) continue;
+      const w = await getWeatherForPlace(cand);
+      if (w) {
+        ctx.lastKeyword = cand;
+        ctx.lastEntities.unshift({ title: cand, ts: now });
+        if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
+        const reply = w.text + ' 他に何か知りたい？';
         pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
-        return { text: reply, meta: { mode: 'recipe', usedKeyword: mainIngredient } };
+        return { text: reply, meta: { source: w.source, usedKeyword: cand } };
       }
     }
   }
 
-  // wikipedia / ddg searches
   for (const cand of candidates) {
     if (!cand || String(cand).trim().length === 0) continue;
     const wiki = await tryWikipedia(cand);
@@ -357,7 +368,6 @@ async function getBotResponse(userId, userMessage, opts = {}){
     }
   }
 
-  // question-ish fallback
   if (intent === 'question' || /どう|なぜ|なに|どの|いつ|どこ/.test(userMessage)) {
     const ddgWhole = await tryDuckDuckGo(userMessage);
     if (ddgWhole) {
@@ -365,16 +375,8 @@ async function getBotResponse(userId, userMessage, opts = {}){
       pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
       return { text: r, meta: { source: ddgWhole.source } };
     }
-    const fallbackQ = choose([
-      'いい質問だね…少し考えさせて。',
-      'その点については色々な見方があるよ。具体的にはどの部分が気になる？',
-      'なるほど、もう少し背景を教えてくれる？'
-    ]);
-    pushHistory(ctx, 'bot', fallbackQ); contextMap.set(userId, ctx);
-    return { text: fallbackQ, meta: { mode: 'clarify' } };
   }
 
-  // smalltalk
   const persona = ctx.persona || 'neutral';
   const s = smalltalk(persona);
   pushHistory(ctx, 'bot', s); contextMap.set(userId, ctx);
@@ -397,7 +399,6 @@ function isEchoMessage(userId, message){
 
 // ---- HTTP handler (Vercel) ----
 module.exports = async (req, res) => {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
