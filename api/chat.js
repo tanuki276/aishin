@@ -1,3 +1,5 @@
+// api/chat.js
+// 完全版 — Kuromoji + fetchフォールバック + Wikipedia/DDG/Weather/Joke/Advice + エコーガード + 初回ウェルカム
 const path = require('path');
 const fs = require('fs');
 
@@ -376,10 +378,11 @@ module.exports = async (req, res) => {
 
     if (!userId) userId = 'anon';
 
-    // echo guard
+    // echo guard: always return a consistent schema
     if (isEchoMessage(userId, message)) {
       console.log('Ignored echo message for userId=', userId);
-      return res.status(200).json({ ignored: true, reason: 'echo' });
+      const resp = { reply: '', text: '', ignored: true, reason: 'echo' };
+      return res.status(200).json(resp);
     }
 
     // welcome: only if client explicitly asked (wantInit === true)
@@ -389,12 +392,14 @@ module.exports = async (req, res) => {
       const ctx = contextMap.get(userId) || { history: [], persona: 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
       pushHistory(ctx, 'bot', welcome);
       contextMap.set(userId, ctx);
-      return res.status(200).json({ reply: welcome, meta: { welcome: true } });
+      return res.status(200).json({ reply: welcome, text: welcome, meta: { welcome: true } });
     }
 
-    // if no message provided (and not init), complain
+    // if no message provided (and not init), complain (consistent schema)
     if (!message) {
       return res.status(400).json({
+        reply: '',
+        text: '',
         error: 'message (or q) is required. To get welcome, provide init=true or send a message.'
       });
     }
@@ -403,15 +408,17 @@ module.exports = async (req, res) => {
     const start = Date.now();
     const result = await getBotResponse(userId, message, { persona: req.query && req.query.persona ? req.query.persona : undefined });
     const took = Date.now() - start;
+    const replyText = result && result.text ? result.text : 'すみません、応答できませんでした。';
     const responseBody = {
-      reply: result && result.text ? result.text : 'すみません、応答できませんでした。',
-      meta: result.meta || {},
+      reply: replyText,
+      text: replyText,
+      meta: result && result.meta ? result.meta : {},
       took_ms: took
     };
     return res.status(200).json(responseBody);
 
   } catch (err) {
     console.error('handler error', err && err.stack ? err.stack : err);
-    return res.status(500).json({ error: 'Internal Server Error', detail: err && err.message ? err.message : String(err) });
+    return res.status(500).json({ reply: '', text: '', error: 'Internal Server Error', detail: err && err.message ? err.message : String(err) });
   }
 };
