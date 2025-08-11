@@ -1,9 +1,9 @@
+// --- 変更なしの既存部分 ---
 const path = require('path');
 const fs = require('fs');
 const kuromoji = require('kuromoji');
 const fetch = require('node-fetch');
 
-// --- data.json から知識ベースを読み込む ---
 const dataPath = path.join(__dirname, 'data.json');
 let knowledgeBase = {};
 try {
@@ -13,14 +13,10 @@ try {
 } catch (error) {
   console.error('Failed to load data.json:', error.message);
 }
-// ----------------------------------------
 
-// ---- APIキーを環境変数から読み込む ----
 const SPOONACULAR_API_KEY = process.env.SPOONACULAR_API_KEY;
 const WOLFRAM_ALPHA_APP_ID = process.env.WOLFRAM_ALPHA_APP_ID;
-// ----------------------------------------
 
-// ---- fetch フォールバック ----
 let fetchImpl = (typeof globalThis !== 'undefined' && globalThis.fetch) ? globalThis.fetch : null;
 if (!fetchImpl) {
   try {
@@ -37,7 +33,6 @@ if (!fetchImpl) {
   }
 }
 
-// ---- kuromoji 初期化（node_modules の dict を使う） ----
 let tokenizer = null;
 const initTokenizer = (async () => {
   try {
@@ -55,7 +50,6 @@ const initTokenizer = (async () => {
   }
 })();
 
-// ---- コンテキスト/履歴（メモリ） ----
 const contextMap = new Map();
 const MAX_HISTORY = 80;
 const CONTEXT_TTL_MS = 1000 * 60 * 30;
@@ -68,7 +62,6 @@ function pushHistory(ctx, role, text){
 }
 function choose(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 
-// ---- インテント判定 ----
 function detectIntent(text){
   if (!text) return 'unknown';
   if (/^(おはよう|こんにちは|こんばんは|やあ|もしもし|おっす)/.test(text)) return 'greeting';
@@ -77,13 +70,11 @@ function detectIntent(text){
   if (/(ジョーク|冗談|ギャグ|おもしろ|笑わせて|ネタ)/.test(text)) return 'joke';
   if (/助言|アドバイス|どうすれば|どうしたら/.test(text)) return 'advice';
   if (/(作り方|レシピ|材料|献立|調理法)/.test(text)) return 'recipe';
-  // 数学的なキーワードや記号をチェック
   if (/[+\-*/^=]/.test(text) || /(計算|平方根|微分|積分|方程式|解)/.test(text)) return 'math';
   if (/\?|\？|かな|かも|だろう/.test(text)) return 'question';
   return 'unknown';
 }
 
-// ---- 形態素/キーワード抽出（簡易） ----
 function getCompoundKeywordsFromTokens(tokens){
   const keywords = [];
   let buf = [];
@@ -102,7 +93,6 @@ function getCompoundKeywordsFromTokens(tokens){
   return Array.from(new Set(keywords.filter(k => k.length > 1))).sort((a, b) => b.length - a.length);
 }
 
-// ---- コア参照（簡易） ----
 function resolveCoref(text, ctx){
   if (!text) return null;
   const pronouns = ['それ','あれ','これ','ここ','そこ','あそこ','この','その','あの'];
@@ -120,7 +110,6 @@ function resolveCoref(text, ctx){
   return null;
 }
 
-// ---- Wikipedia (ja) 検索 ----
 async function tryWikipedia(keyword){
   if (!fetchImpl || !keyword) return null;
   try {
@@ -145,7 +134,6 @@ async function tryWikipedia(keyword){
   return null;
 }
 
-// ---- DuckDuckGo Instant Answer ----
 async function tryDuckDuckGo(q){
   if (!fetchImpl || !q) return null;
   try {
@@ -161,7 +149,6 @@ async function tryDuckDuckGo(q){
   return null;
 }
 
-// ---- レシピ検索 (Spoonacular) ----
 async function trySpoonacular(query){
   if (!fetchImpl || !query || !SPOONACULAR_API_KEY) return null;
   try {
@@ -180,7 +167,6 @@ async function trySpoonacular(query){
   return null;
 }
 
-// ---- 数学計算 (WolframAlpha) ----
 async function tryWolframAlpha(query){
   if (!fetchImpl || !query || !WOLFRAM_ALPHA_APP_ID) return null;
   try {
@@ -195,7 +181,6 @@ async function tryWolframAlpha(query){
   return null;
 }
 
-// ---- Joke / Advice / Weather helpers ----
 async function getJoke(){
   if (!fetchImpl) return null;
   try {
@@ -240,7 +225,6 @@ async function getWeatherForPlace(place){
   return null;
 }
 
-// ---- 雑談（トーン） ----
 const smalltalkPools = {
   neutral: ['ふむ、なるほどね。','へえ、そうなんだ！','面白いね。もっと聞かせて？','いいね、その話。'],
   snarky: ['そう？でも本気で言ってるの？','おや、それは意外（としか言えない）','ふーん、君は勇気あるね。'],
@@ -248,7 +232,7 @@ const smalltalkPools = {
 };
 function smalltalk(mode='neutral'){ return choose(smalltalkPools[mode] || smalltalkPools.neutral); }
 
-// ---- 応答ロジック ----
+// --- 変更ここから ---
 async function getBotResponse(userId, userMessage, opts = {}){
   await initTokenizer;
 
@@ -284,8 +268,7 @@ async function getBotResponse(userId, userMessage, opts = {}){
     pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
     return { text: r, meta: { mode: 'thanks' } };
   }
-  
-  // ---- 外部APIを積極的に活用する ----
+
   if (intent === 'recipe') {
     const recipeKeywords = getCompoundKeywordsFromTokens(tokenizer.tokenize(userMessage)).filter(k => !/(作り方|レシピ|材料|献立|調理法)/.test(k));
     const query = recipeKeywords.length > 0 ? recipeKeywords.join(' ') : userMessage;
@@ -315,67 +298,80 @@ async function getBotResponse(userId, userMessage, opts = {}){
     if (a) { pushHistory(ctx, 'bot', a.text); contextMap.set(userId, ctx); return { text: a.text, meta: { source: a.source } }; }
   }
 
-  // ---- ローカル知識ベースと一般検索にフォールバック ----
   let tokens = [];
   if (tokenizer) {
     try { tokens = tokenizer.tokenize(userMessage); } catch (e) { /* ignore */ }
   }
+  const extractedKeywords = getCompoundKeywordsFromTokens(tokens).filter(k => k.length > 1);
+
+  // 検索クエリの優先順位リスト
+  const searchQueries = [];
+  // 1. 入力全体
+  searchQueries.push(userMessage);
+  // 2. 複数のキーワードをスペースで結合
+  if (extractedKeywords.length > 1) {
+    searchQueries.push(extractedKeywords.join(' '));
+  }
+  // 3. 個々のキーワード
+  searchQueries.push(...extractedKeywords);
+
+  // コア参照を解決し、検索クエリに追加
   const coref = resolveCoref(userMessage, ctx);
-  const extracted = getCompoundKeywordsFromTokens(tokens);
-  const candidates = [];
-  if (coref) candidates.push(coref);
-  for (const k of extracted) {
-    if (knowledgeBase[k]) { candidates.push(knowledgeBase[k]); }
-    if (!candidates.includes(k)) { candidates.push(k); }
+  if (coref) {
+      const corefQuery = `${coref} ${extractedKeywords.join(' ')}`.trim();
+      searchQueries.unshift(corefQuery);
   }
-  if (ctx.lastEntities && ctx.lastEntities.length) {
-    for (const e of ctx.lastEntities) if (!candidates.includes(e.title)) candidates.push(e.title);
-  }
-  
+
+  // 重複を削除して、優先順位通りに検索を試みる
+  const uniqueQueries = [...new Set(searchQueries)].filter(q => q.length > 0);
+
+  // 天気検索
   if (intent === 'weather') {
-    for (const cand of candidates) {
-      if (!cand) continue;
-      const w = await getWeatherForPlace(cand);
+    for (const q of uniqueQueries) {
+      const w = await getWeatherForPlace(q);
       if (w) {
-        ctx.lastKeyword = cand;
-        ctx.lastEntities.unshift({ title: cand, ts: now });
+        ctx.lastKeyword = q;
+        ctx.lastEntities.unshift({ title: q, ts: now });
         if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
         const reply = w.text + ' 他に何か知りたい？';
         pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
-        return { text: reply, meta: { source: w.source, usedKeyword: cand } };
+        return { text: reply, meta: { source: w.source, usedKeyword: q } };
       }
     }
   }
 
-  for (const cand of candidates) {
-    if (!cand || String(cand).trim().length === 0) continue;
-    const wiki = await tryWikipedia(cand);
+  // 一般検索
+  for (const q of uniqueQueries) {
+    // Wikipediaを試す
+    const wiki = await tryWikipedia(q);
     if (wiki) {
-      ctx.lastKeyword = cand;
+      ctx.lastKeyword = q;
       ctx.lastEntities.unshift({ title: wiki.title, ts: now });
       if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
-      const reply = `お調べしました：「${wiki.title}」 — ${wiki.text} 他にも知りたい？`;
+      const reply = `お調べしました：「${wiki.title}」 — ${wiki.text}。他に知りたいことはありますか？`;
       pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
-      return { text: reply, meta: { source: wiki.source, title: wiki.title } };
+      return { text: reply, meta: { source: wiki.source, title: wiki.title, usedQuery: q } };
     }
-    const ddg = await tryDuckDuckGo(cand);
+
+    // DuckDuckGoを試す
+    const ddg = await tryDuckDuckGo(q);
     if (ddg) {
-      ctx.lastKeyword = cand;
+      ctx.lastKeyword = q;
       ctx.lastEntities.unshift({ title: ddg.title, ts: now });
       if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
-      const reply = `ちょっと調べたら：「${ddg.title}」 — ${ddg.text}。どうする？`;
+      const reply = `ちょっと調べたら、「${ddg.title}」に関する情報が見つかりました：${ddg.text}。どうでしょうか？`;
       pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
-      return { text: reply, meta: { source: ddg.source, title: ddg.title } };
+      return { text: reply, meta: { source: ddg.source, title: ddg.title, usedQuery: q } };
     }
   }
 
-  if (intent === 'question' || /どう|なぜ|なに|どの|いつ|どこ/.test(userMessage)) {
-    const ddgWhole = await tryDuckDuckGo(userMessage);
-    if (ddgWhole) {
-      const r = `${ddgWhole.title} に関する情報です： ${ddgWhole.text} もっと詳しく？`;
-      pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
-      return { text: r, meta: { source: ddgWhole.source } };
-    }
+  // どの検索も失敗した場合
+  // 抽出されたキーワードがある場合は、それを基に回答を試みる
+  if (extractedKeywords.length > 0) {
+    const keywords = extractedKeywords.join('、');
+    const reply = `すみません、「${keywords}」に関する情報をうまく見つけることができませんでした。質問の内容を変えていただけますか？`;
+    pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+    return { text: reply, meta: { mode: 'search_fail', keywords: extractedKeywords } };
   }
 
   const persona = ctx.persona || 'neutral';
@@ -384,7 +380,8 @@ async function getBotResponse(userId, userMessage, opts = {}){
   return { text: s, meta: { mode: 'smalltalk', persona } };
 }
 
-// ---- helper: エコー判定（ボットの直近発話と一致するか） ----
+// --- 変更ここから ---
+
 function isEchoMessage(userId, message){
   if (!message) return false;
   const ctx = contextMap.get(userId);
@@ -398,7 +395,6 @@ function isEchoMessage(userId, message){
   return false;
 }
 
-// ---- HTTP handler (Vercel) ----
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
