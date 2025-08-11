@@ -4,11 +4,21 @@ const apiEndpoint = '/api/chat';
 // UI要素の取得
 const chatInput = document.getElementById('user-input');
 const sendButton = document.getElementById('send-button');
+const chatMessages = document.getElementById('chat-messages');
 
 // 初期状態でチャット機能を無効化
 chatInput.disabled = true;
 sendButton.disabled = true;
 chatInput.placeholder = "ボットの準備中です。少々お待ちください...";
+
+// メッセージをチャット画面に追加する関数
+function addMessageToChat(sender, message) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${sender}-message`;
+    messageDiv.innerHTML = `<span class="bubble">${message}</span>`;
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
 
 // 初回メッセージ（準備中）をボットから送信
 addMessageToChat("bot", "ボットを起動しています。準備ができるまでお待ちください...");
@@ -16,13 +26,13 @@ addMessageToChat("bot", "ボットを起動しています。準備ができる�
 // APIからの初回応答を待つための関数
 async function initializeChat() {
     try {
-        const initialMessage = '起動'; // 最初のメッセージとしてAPIに送信
+        // APIに起動フラグ（init: true）を送信
         const response = await fetch(apiEndpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 userId: userId,
-                message: initialMessage
+                init: true // 起動フラグを追加
             })
         });
 
@@ -33,7 +43,8 @@ async function initializeChat() {
             sendButton.disabled = false;
             chatInput.placeholder = "メッセージを入力...";
             // 初回応答を表示
-            addMessageToChat("bot", data.response);
+            // サーバーからの応答キーを `data.reply` に修正
+            addMessageToChat("bot", data.reply);
         } else {
             const errorData = await response.json();
             addMessageToChat("bot", `エラーが発生しました: ${errorData.error}`);
@@ -74,7 +85,8 @@ async function sendMessage() {
 
         const data = await response.json();
         if (response.ok) {
-            addMessageToChat("bot", data.response);
+            // サーバーからの応答キーを `data.reply` に修正
+            addMessageToChat("bot", data.reply);
         } else {
             addMessageToChat("bot", `エラーが発生しました: ${data.error}`);
         }
@@ -82,13 +94,4 @@ async function sendMessage() {
         console.error('API request failed:', error);
         addMessageToChat("bot", "サーバーとの通信に失敗しました。");
     }
-}
-
-function addMessageToChat(sender, message) {
-    const chatMessages = document.getElementById('chat-messages');
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${sender}-message`;
-    messageDiv.innerHTML = `<span class="bubble">${message}</span>`;
-    chatMessages.appendChild(messageDiv);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
 }
