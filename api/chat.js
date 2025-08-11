@@ -51,7 +51,7 @@ const initTokenizer = (async () => {
 // ---- コンテキスト/履歴（メモリ） ----
 const contextMap = new Map();
 const MAX_HISTORY = 80;
-const CONTEXT_TTL_MS = 1000 * 60 * 15; 
+const CONTEXT_TTL_MS = 1000 * 60 * 15;
 
 function nowTs(){ return Date.now(); }
 function pushHistory(ctx, role, text){
@@ -69,7 +69,7 @@ function detectIntent(text){
   if (/(天気|気温|降水|雨|晴れ)/.test(text)) return 'weather';
   if (/(ジョーク|冗談|ギャグ|おもしろ|笑わせて|ネタ)/.test(text)) return 'joke';
   if (/助言|アドバイス|どうすれば|どうしたら/.test(text)) return 'advice';
-  if (/\?|\？/.test(text)) return 'question';
+  if (/\?|\？|かな|かも|だろう/.test(text)) return 'question';
   return 'unknown';
 }
 
@@ -84,7 +84,7 @@ function getCompoundKeywordsFromTokens(tokens){
     const isProper = t.pos_detail_1 === '固有名詞';
     const isKatakana = /^[\u30A0-\u30FF]+$/.test(sf);
     const isAlphaNum = /^[A-Za-z0-9\-\_]+$/.test(sf);
-    const isAllowed = (isNoun || isKatakana || isAlphaNum || isProper);
+    const isAllowed = (isNoun || isKatakana || isAlphaNum || isProper) || (t.pos === '助詞' && (sf === 'の' || sf === 'は'));
     if (isAllowed) buf.push(sf);
     else pushBuf();
   }
@@ -96,7 +96,7 @@ function getCompoundKeywordsFromTokens(tokens){
 async function tryDuckDuckGo(q){
   if (!fetchImpl || !q) return null;
   try {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skip_disambig=1&t=user`;
+    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skipsdisambig=1&t=user`;
     const res = await fetchImpl(url);
     if (!res.ok) return null;
     const j = await res.json();
@@ -111,21 +111,45 @@ async function tryDuckDuckGo(q){
 }
 
 // ---- プロパティ抽出（思考の心臓部） ----
-function extractProperties(text) {
+function extractPropertiesAndType(text) {
   const properties = [];
+  let type = '不明';
+
+  // タイプ判定
+  if (/(武器|道具|近接戦闘|槍|刀)/.test(text)) {
+      type = '道具'; properties.push('近接', '非火器', '手動');
+  } else if (/(航空機|飛行機|爆撃機|戦闘機)/.test(text)) {
+      type = '対象'; properties.push('高高度', '高速', '遠距離');
+  } else if (/(猫|犬|鳥|魚|動物)/.test(text)) {
+      type = '生物'; properties.push('平地', '温帯', '熱帯');
+  } else if (/(山|海|極地|平地|場所)/.test(text)) {
+      type = '場所'; properties.push('高山', '極地', '深海');
+  } else if (/(原因|作用|影響|現象)/.test(text)) {
+      type = '事象'; properties.push('原因', '作用', '影響');
+  } else if (/(結果|反応|変化)/.test(text)) {
+      type = '事象'; properties.push('結果', '反応', '変化');
+  } else if (/(光|闇|善|悪|概念)/.test(text)) {
+      type = '概念'; properties.push('対義', '矛盾', '対立');
+  } else if (/(歴史|人物|功績|出来事)/.test(text)) {
+      type = '歴史'; properties.push('歴史', '功績', '関連');
+  }
+
+  // テキストからの追加プロパティ抽出
   if (/(近接|近距離)/.test(text)) properties.push('近接');
-  if (/(高高度|上空|航空機|飛行機)/.test(text)) properties.push('高高度');
-  if (/(平地|平野|温暖|熱帯)/.test(text)) properties.push('平地');
-  if (/(高山|山岳|極地|深海|特殊環境)/.test(text)) properties.push('高山');
-  if (/(作用|原因|影響)/.test(text)) properties.push('原因');
-  if (/(反応|変化|結果)/.test(text)) properties.push('結果');
-  if (/(矛盾|対立|対義)/.test(text)) properties.push('矛盾');
-  if (/(類似|同じ|比較|共通)/.test(text)) properties.push('類似');
-  if (/(歴史|功績|時代|出来事)/.test(text)) properties.push('歴史');
-  return properties;
+  if (/(高高度|上空)/.test(text)) properties.push('高高度');
+  if (/(平地|平野)/.test(text)) properties.push('平地');
+  if (/(高山|山岳|特殊環境)/.test(text)) properties.push('高山');
+  if (/(原因|作用|影響)/.test(text)) properties.push('原因', '作用');
+  if (/(結果|反応|変化)/.test(text)) properties.push('結果', '変化');
+  if (/(矛盾|対立|対義)/.test(text)) properties.push('矛盾', '対立');
+  if (/(類似|同じ|共通)/.test(text)) properties.push('類似', '同じカテゴリ');
+  if (/(歴史|功績|時代|出来事)/.test(text)) properties.push('歴史', '関連');
+  
+  return { type, properties: Array.from(new Set(properties)) };
 }
 
-// ---- 推論・生成ロジック ----
+
+// ---- 推論・生成ロジック（改良版） ----
 async function searchAndInfer(keywords){
   if (!keywords || keywords.length < 2) return null;
 
@@ -139,22 +163,25 @@ async function searchAndInfer(keywords){
     return null;
   }
 
-  const subjectProperties = extractProperties(subjectSearch.text);
-  const objectProperties = extractProperties(objectSearch.text);
+  const subjectInfo = extractPropertiesAndType(subjectSearch.text);
+  const objectInfo = extractPropertiesAndType(objectSearch.text);
 
-  if (subjectProperties.length > 0 && objectProperties.length > 0) {
+  if (subjectInfo.properties.length > 0 && objectInfo.properties.length > 0) {
     for (const pattern of botData.inferencePatterns) {
-      const subjectMatch = pattern.conditions[0].keyword1_properties.some(prop => subjectProperties.includes(prop));
-      const objectMatch = pattern.conditions[1].keyword2_properties.some(prop => objectProperties.includes(prop));
+      const subjectTypeMatch = pattern.conditions[0].keyword1_type === subjectInfo.type;
+      const objectTypeMatch = pattern.conditions[1].keyword2_type === objectInfo.type;
       
-      if (subjectMatch && objectMatch) {
+      const subjectPropsMatch = pattern.conditions[0].keyword1_properties.some(prop => subjectInfo.properties.includes(prop));
+      const objectPropsMatch = pattern.conditions[1].keyword2_properties.some(prop => objectInfo.properties.includes(prop));
+      
+      if (subjectTypeMatch && objectTypeMatch && subjectPropsMatch && objectPropsMatch) {
         const template = choose(pattern.responseTemplates);
         const responseText = template
-          .replace('{{keyword1}}', subjectName)
-          .replace('{{keyword2}}', objectName)
-          .replace('{{keyword1_reason}}', subjectSearch.text)
-          .replace('{{keyword2_reason}}', objectSearch.text)
-          .replace('{{reason}}', pattern.negation_reason || ''); // テンプレートによっては理由を直接挿入
+          .replace(/{{keyword1}}/g, subjectName)
+          .replace(/{{keyword2}}/g, objectName)
+          .replace(/{{keyword1_reason}}/g, subjectSearch.text)
+          .replace(/{{keyword2_reason}}/g, objectSearch.text)
+          .replace(/{{reason}}/g, pattern.negation_reason || '');
 
         return { text: responseText, meta: { rule: pattern.name } };
       }
