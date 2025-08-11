@@ -3,10 +3,11 @@ const fs = require('fs');
 
 // --- data.json から知識ベースを読み込む ---
 const dataPath = path.join(__dirname, 'data.json');
-let botData = { inferencePatterns: [] };
+let knowledgeBase = {};
 try {
   const rawData = fs.readFileSync(dataPath, 'utf8');
-  botData = JSON.parse(rawData);
+  const botData = JSON.parse(rawData);
+  knowledgeBase = botData.knowledgeBase || {};
 } catch (error) {
   console.error('Failed to load data.json:', error.message);
 }
@@ -51,7 +52,8 @@ const initTokenizer = (async () => {
 // ---- コンテキスト/履歴（メモリ） ----
 const contextMap = new Map();
 const MAX_HISTORY = 80;
-const CONTEXT_TTL_MS = 1000 * 60 * 15;
+// タイムアウト時間を15分に短縮
+const CONTEXT_TTL_MS = 1000 * 60 * 15; 
 
 function nowTs(){ return Date.now(); }
 function pushHistory(ctx, role, text){
@@ -84,19 +86,64 @@ function getCompoundKeywordsFromTokens(tokens){
     const isProper = t.pos_detail_1 === '固有名詞';
     const isKatakana = /^[\u30A0-\u30FF]+$/.test(sf);
     const isAlphaNum = /^[A-Za-z0-9\-\_]+$/.test(sf);
+    // 助詞「の」「は」も連結対象とする
     const isAllowed = (isNoun || isKatakana || isAlphaNum || isProper) || (t.pos === '助詞' && (sf === 'の' || sf === 'は'));
     if (isAllowed) buf.push(sf);
     else pushBuf();
   }
   pushBuf();
+  // 連結されたキーワードをソートし、文字数が1以下のものを除外
   return Array.from(new Set(keywords.filter(k => k.length > 1))).sort((a, b) => b.length - a.length);
+}
+
+// ---- コア参照（簡易） ----
+function resolveCoref(text, ctx){
+  if (!text) return null;
+  const pronouns = ['それ','あれ','これ','ここ','そこ','あそこ','この','その','あの'];
+  if (!pronouns.some(p => text.includes(p))) return null;
+  const m = text.match(/(この|その|あの)([^\s　]+)/);
+  if (m){
+    const noun = m[2];
+    if (ctx && ctx.lastEntities && ctx.lastEntities.length){
+      for (const e of ctx.lastEntities) if (e.title.includes(noun) || e.title === noun) return e.title;
+    }
+    return noun;
+  }
+  if (ctx && ctx.lastEntities && ctx.lastEntities.length) return ctx.lastEntities[0].title;
+  if (ctx && ctx.lastKeyword) return ctx.lastKeyword;
+  return null;
+}
+
+// ---- Wikipedia (ja) 検索 ----
+async function tryWikipedia(keyword){
+  if (!fetchImpl || !keyword) return null;
+  try {
+    const opUrl = `https://ja.wikipedia.org/w/api.php?action=opensearch&limit=5&format=json&origin=*&search=${encodeURIComponent(keyword)}`;
+    const opRes = await fetchImpl(opUrl);
+    if (!opRes.ok) return null;
+    const opJson = await opRes.json();
+    const titles = opJson && opJson[1] ? opJson[1] : [];
+    for (const t of titles){
+      const sumUrl = `https://ja.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(t)}`;
+      const sres = await fetchImpl(sumUrl);
+      if (!sres.ok) continue;
+      const sjson = await sres.json();
+      if (sjson && sjson.extract){
+        const text = (sjson.extract.length > 600) ? sjson.extract.substring(0,600) + '...' : sjson.extract;
+        return { source: 'wikipedia', title: sjson.title, text };
+      }
+    }
+  } catch (err) {
+    console.warn('tryWikipedia error', err && err.message ? err.message : err);
+  }
+  return null;
 }
 
 // ---- DuckDuckGo Instant Answer ----
 async function tryDuckDuckGo(q){
   if (!fetchImpl || !q) return null;
   try {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skipsdisambig=1&t=user`;
+    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skipsdisambig=1`;
     const res = await fetchImpl(url);
     if (!res.ok) return null;
     const j = await res.json();
@@ -110,88 +157,68 @@ async function tryDuckDuckGo(q){
   return null;
 }
 
-// ---- プロパティ抽出（思考の心臓部） ----
-function extractPropertiesAndType(text) {
-  const properties = [];
-  let type = '不明';
-
-  // タイプ判定
-  if (/(武器|道具|近接戦闘|槍|刀)/.test(text)) {
-      type = '道具'; properties.push('近接', '非火器', '手動');
-  } else if (/(航空機|飛行機|爆撃機|戦闘機)/.test(text)) {
-      type = '対象'; properties.push('高高度', '高速', '遠距離');
-  } else if (/(猫|犬|鳥|魚|動物)/.test(text)) {
-      type = '生物'; properties.push('平地', '温帯', '熱帯');
-  } else if (/(山|海|極地|平地|場所)/.test(text)) {
-      type = '場所'; properties.push('高山', '極地', '深海');
-  } else if (/(原因|作用|影響|現象)/.test(text)) {
-      type = '事象'; properties.push('原因', '作用', '影響');
-  } else if (/(結果|反応|変化)/.test(text)) {
-      type = '事象'; properties.push('結果', '反応', '変化');
-  } else if (/(光|闇|善|悪|概念)/.test(text)) {
-      type = '概念'; properties.push('対義', '矛盾', '対立');
-  } else if (/(歴史|人物|功績|出来事)/.test(text)) {
-      type = '歴史'; properties.push('歴史', '功績', '関連');
-  }
-
-  // テキストからの追加プロパティ抽出
-  if (/(近接|近距離)/.test(text)) properties.push('近接');
-  if (/(高高度|上空)/.test(text)) properties.push('高高度');
-  if (/(平地|平野)/.test(text)) properties.push('平地');
-  if (/(高山|山岳|特殊環境)/.test(text)) properties.push('高山');
-  if (/(原因|作用|影響)/.test(text)) properties.push('原因', '作用');
-  if (/(結果|反応|変化)/.test(text)) properties.push('結果', '変化');
-  if (/(矛盾|対立|対義)/.test(text)) properties.push('矛盾', '対立');
-  if (/(類似|同じ|共通)/.test(text)) properties.push('類似', '同じカテゴリ');
-  if (/(歴史|功績|時代|出来事)/.test(text)) properties.push('歴史', '関連');
-  
-  return { type, properties: Array.from(new Set(properties)) };
-}
-
-
-// ---- 推論・生成ロジック（改良版） ----
-async function searchAndInfer(keywords){
-  if (!keywords || keywords.length < 2) return null;
-
-  const subjectName = keywords[0];
-  const objectName = keywords[1];
-
-  const subjectSearch = await tryDuckDuckGo(subjectName);
-  const objectSearch = await tryDuckDuckGo(objectName);
-  
-  if (!subjectSearch || !objectSearch) {
-    return null;
-  }
-
-  const subjectInfo = extractPropertiesAndType(subjectSearch.text);
-  const objectInfo = extractPropertiesAndType(objectSearch.text);
-
-  if (subjectInfo.properties.length > 0 && objectInfo.properties.length > 0) {
-    for (const pattern of botData.inferencePatterns) {
-      const subjectTypeMatch = pattern.conditions[0].keyword1_type === subjectInfo.type;
-      const objectTypeMatch = pattern.conditions[1].keyword2_type === objectInfo.type;
-      
-      const subjectPropsMatch = pattern.conditions[0].keyword1_properties.some(prop => subjectInfo.properties.includes(prop));
-      const objectPropsMatch = pattern.conditions[1].keyword2_properties.some(prop => objectInfo.properties.includes(prop));
-      
-      if (subjectTypeMatch && objectTypeMatch && subjectPropsMatch && objectPropsMatch) {
-        const template = choose(pattern.responseTemplates);
-        const responseText = template
-          .replace(/{{keyword1}}/g, subjectName)
-          .replace(/{{keyword2}}/g, objectName)
-          .replace(/{{keyword1_reason}}/g, subjectSearch.text)
-          .replace(/{{keyword2_reason}}/g, objectSearch.text)
-          .replace(/{{reason}}/g, pattern.negation_reason || '');
-
-        return { text: responseText, meta: { rule: pattern.name } };
-      }
+// ---- Joke / Advice / Weather helpers ----
+async function getJoke(){
+  if (!fetchImpl) return null;
+  try {
+    const res = await fetchImpl('https://official-joke-api.appspot.com/random_joke');
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (j && j.setup) return { source: 'joke', text: `${j.setup} — ${j.punchline || ''}`.trim() };
+  } catch(e){ }
+  try {
+    const r2 = await fetchImpl('https://api.adviceslip.com/advice');
+    if (r2.ok){
+      const a = await r2.json();
+      if (a && a.slip && a.slip.advice) return { source: 'advice-slip', text: a.slip.advice };
     }
-  }
-
+  } catch(e){}
   return null;
 }
 
-// ---- 応答ロジック（修正済み） ----
+async function getAdvice(){
+  if (!fetchImpl) return null;
+  try {
+    const res = await fetchImpl('https://api.adviceslip.com/advice');
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (j && j.slip && j.slip.advice) return { source: 'advice', text: j.slip.advice };
+  } catch(e){}
+  return null;
+}
+
+async function getWeatherForPlace(place){
+  if (!fetchImpl || !place) return null;
+  try {
+    const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(place)}&limit=1`;
+    const nom = await fetchImpl(nomUrl, { headers: { 'User-Agent': 'vercel-chat-example/1.0' }});
+    if (!nom.ok) return null;
+    const nomj = await nom.json();
+    if (!nomj || !nomj[0]) return null;
+    const lat = parseFloat(nomj[0].lat), lon = parseFloat(nomj[0].lon), display = nomj[0].display_name;
+    const meto = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&timezone=auto`;
+    const mres = await fetchImpl(meto);
+    if (!mres.ok) return null;
+    const mj = await mres.json();
+    if (mj && mj.current_weather) {
+      const cw = mj.current_weather;
+      const text = `${display} の現在の天気: weathercode=${cw.weathercode || ''}、気温 ${cw.temperature}°C、風速 ${cw.windspeed} m/s（取得元: Open-Meteo）`;
+      return { source: 'open-meteo', text, meta: { lat, lon } };
+    }
+  } catch(e){ console.warn('getWeatherForPlace error', e && e.message ? e.message : e); }
+  return null;
+}
+
+// ---- 雑談（トーン） ----
+const smalltalkPools = {
+  neutral: ['ふむ、なるほどね。','へえ、そうなんだ！','面白いね。もっと聞かせて？','いいね、その話。'],
+  snarky: ['そう？でも本気で言ってるの？','おや、それは意外（としか言えない）','ふーん、君は勇気あるね。'],
+  kind: ['いいね、よくやったね。','素敵な話だね。ありがとう。','そういうの聞けて嬉しいよ。']
+};
+function smalltalk(mode='neutral'){ return choose(smalltalkPools[mode] || smalltalkPools.neutral); }
+
+
+// ---- 応答ロジック ----
 async function getBotResponse(userId, userMessage, opts = {}){
   await initTokenizer;
 
@@ -200,42 +227,134 @@ async function getBotResponse(userId, userMessage, opts = {}){
   if (!ctx || (now - (ctx.updatedAt || 0) > CONTEXT_TTL_MS)) {
     ctx = { history: [], persona: opts.persona || 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
   }
+
+  // 新しい話題への移行をチェック (修正点)
+  let isNewTopic = false;
+  if (ctx.lastKeyword) {
+    let currentKeywords = getCompoundKeywordsFromTokens(tokenizer.tokenize(userMessage));
+    // 過去のキーワードと現在のキーワードが一致しない、または全く関連性がない場合
+    if (!currentKeywords.some(k => ctx.lastKeyword.includes(k) || k.includes(ctx.lastKeyword))) {
+      isNewTopic = true;
+    }
+  }
+  if (isNewTopic) {
+      console.log('Detected new topic. Resetting context for userId=', userId);
+      ctx = { history: [], persona: opts.persona || 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
+  }
+
   pushHistory(ctx, 'user', userMessage);
 
   const intent = detectIntent(userMessage);
+
+  if (intent === 'greeting') {
+    const r = choose(['こんにちは！今日どうする？','やあ！何か知りたい？','おっす、調べ・雑談どっちがいい？']);
+    pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
+    return { text: r, meta: { mode: 'greeting' } };
+  }
+  if (intent === 'thanks') {
+    const r = choose(['どういたしまして！','いつでも聞いてね。']);
+    pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
+    return { text: r, meta: { mode: 'thanks' } };
+  }
 
   let tokens = [];
   if (tokenizer) {
     try { tokens = tokenizer.tokenize(userMessage); } catch (e) { console.warn('tokenize failed', e && e.message ? e.message : e); }
   }
 
+  const coref = resolveCoref(userMessage, ctx);
   const extracted = getCompoundKeywordsFromTokens(tokens);
 
-  // 新しい推論ロジックを優先して実行
-  const inferResult = await searchAndInfer(extracted);
-  if (inferResult) {
-    pushHistory(ctx, 'bot', inferResult.text);
-    contextMap.set(userId, ctx);
-    return { text: inferResult.text, meta: inferResult.meta };
+  // 知識ベースから得られる「ヒント」と複合キーワードの候補を生成
+  const candidates = [];
+  if (coref) candidates.push(coref);
+  for (const k of extracted) {
+    // 複合キーワードが知識ベースに存在する場合、その答えを検索候補として追加
+    if (knowledgeBase[k]) {
+      candidates.push(knowledgeBase[k]);
+    }
+    if (!candidates.includes(k)) {
+      candidates.push(k);
+    }
   }
-  
-  // 従来のキーワード検索ロジック (単一キーワード)
-  for (const cand of extracted) {
+  if (ctx.lastEntities && ctx.lastEntities.length) {
+    for (const e of ctx.lastEntities) if (!candidates.includes(e.title)) candidates.push(e.title);
+  }
+
+  // weather intent (優先度を上げるため、キーワード検索の前に移動)
+  if (intent === 'weather') {
+    for (const cand of candidates) {
+      if (!cand) continue;
+      const w = await getWeatherForPlace(cand);
+      if (w) {
+        ctx.lastKeyword = cand;
+        ctx.lastEntities.unshift({ title: cand, ts: now });
+        if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
+        const reply = w.text + ' 何か他に知りたい？';
+        pushHistory(ctx, 'bot', reply);
+        contextMap.set(userId, ctx);
+        return { text: reply, meta: { source: w.source, usedKeyword: cand } };
+      }
+    }
+    const placeMatch = userMessage.match(/([^\s　]+市|都|道|府|県|町|村|区|東京|大阪|京都)/);
+    if (placeMatch) {
+      const w2 = await getWeatherForPlace(placeMatch[0]);
+      if (w2) {
+        const reply = w2.text + ' 何か他に知りたい？';
+        pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+        return { text: reply, meta: { source: w2.source, usedKeyword: placeMatch[0] } };
+      }
+    }
+    const r = 'ごめん、場所の特定ができなかったか、天気情報を取得できませんでした。地名を教えてもらえる？';
+    pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
+    return { text: r, meta: { mode: 'weather-failed' } };
+  }
+
+  // joke / advice intents (優先度を上げる)
+  if (intent === 'joke') {
+    const j = await getJoke();
+    if (j) { pushHistory(ctx, 'bot', j.text); contextMap.set(userId, ctx); return { text: j.text, meta: { source: j.source } }; }
+  }
+  if (intent === 'advice') {
+    const a = await getAdvice();
+    if (a) { pushHistory(ctx, 'bot', a.text); contextMap.set(userId, ctx); return { text: a.text, meta: { source: a.source } }; }
+  }
+
+  // wikipedia / ddg searches
+  for (const cand of candidates) {
     if (!cand || String(cand).trim().length === 0) continue;
+    const wiki = await tryWikipedia(cand);
+    if (wiki) {
+      ctx.lastKeyword = cand;
+      ctx.lastEntities.unshift({ title: wiki.title, ts: now });
+      if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
+      const reply = `お調べしました：「${wiki.title}」 — ${wiki.text} 他にも知りたい？`;
+      pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+      return { text: reply, meta: { source: wiki.source, title: wiki.title } };
+    }
     const ddg = await tryDuckDuckGo(cand);
     if (ddg) {
       ctx.lastKeyword = cand;
-      const reply = `ちょっと調べたら：「${ddg.title}」 — ${ddg.text}。何か他に知りたい？`;
+      ctx.lastEntities.unshift({ title: ddg.title, ts: now });
+      if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
+      const reply = `ちょっと調べたら：「${ddg.title}」 — ${ddg.text}。どうする？`;
       pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
       return { text: reply, meta: { source: ddg.source, title: ddg.title } };
     }
   }
 
-  // 質問に対する汎用的なフォールバック
+  // question-ish fallback
   if (intent === 'question' || /どう|なぜ|なに|どの|いつ|どこ/.test(userMessage)) {
+    const ddgWhole = await tryDuckDuckGo(userMessage);
+    if (ddgWhole) {
+      const r = `${ddgWhole.title} に関する情報です： ${ddgWhole.text} もっと詳しく？`;
+      pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
+      return { text: r, meta: { source: ddgWhole.source } };
+    }
     const fallbackQ = choose([
       'いい質問だね…少し考えさせて。',
-      'その点については色々な見方があるよ。具体的にはどの部分が気になる？'
+      'その点については色々な見方があるよ。具体的にはどの部分が気になる？',
+      'なるほど、もう少し背景を教えてくれる？'
     ]);
     pushHistory(ctx, 'bot', fallbackQ); contextMap.set(userId, ctx);
     return { text: fallbackQ, meta: { mode: 'clarify' } };
@@ -243,16 +362,32 @@ async function getBotResponse(userId, userMessage, opts = {}){
 
   // smalltalk
   const persona = ctx.persona || 'neutral';
-  const s = choose(['ふむ、なるほどね。','へえ、そうなんだ！','面白いね、もっと聞かせて？','いいね、その話。']);
+  const s = smalltalk(persona);
   pushHistory(ctx, 'bot', s); contextMap.set(userId, ctx);
   return { text: s, meta: { mode: 'smalltalk', persona } };
 }
 
+// ---- helper: エコー判定（ボットの直近発話と一致するか） ----
+function isEchoMessage(userId, message){
+  if (!message) return false;
+  const ctx = contextMap.get(userId);
+  if (!ctx || !ctx.history || ctx.history.length === 0) return false;
+  for (let i = ctx.history.length - 1; i >= 0; i--){
+    const item = ctx.history[i];
+    if (item.role === 'bot' && item.text) {
+      return String(item.text).trim() === String(message).trim();
+    }
+  }
+  return false;
+}
+
 // ---- HTTP handler (Vercel) ----
 module.exports = async (req, res) => {
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
@@ -276,7 +411,13 @@ module.exports = async (req, res) => {
     }
 
     if (!userId) userId = 'anon';
-    
+
+    if (isEchoMessage(userId, message)) {
+      console.log('Ignored echo message for userId=', userId);
+      const resp = { reply: '', text: '', ignored: true, reason: 'echo' };
+      return res.status(200).json(resp);
+    }
+
     if (wantInit) {
       const welcome = '何か質問はありますか？';
       const now = nowTs();
@@ -285,6 +426,7 @@ module.exports = async (req, res) => {
       contextMap.set(userId, ctx);
       return res.status(200).json({ reply: welcome, text: welcome, meta: { welcome: true } });
     }
+
     if (!message) {
       return res.status(400).json({
         reply: '',
@@ -304,6 +446,7 @@ module.exports = async (req, res) => {
       took_ms: took
     };
     return res.status(200).json(responseBody);
+
   } catch (err) {
     console.error('handler error', err && err.stack ? err.stack : err);
     return res.status(500).json({ reply: '', text: '', error: 'Internal Server Error', detail: err && err.message ? err.message : String(err) });
