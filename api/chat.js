@@ -1,6 +1,13 @@
 const path = require('path');
 const fs = require('fs');
 
+// --- data.json から知識ベースを読み込む ---
+const dataPath = path.join(__dirname, 'data.json');
+const rawData = fs.readFileSync(dataPath);
+const botData = JSON.parse(rawData);
+const knowledgeBase = botData.knowledgeBase;
+// ----------------------------------------
+
 // ---- fetch フォールバック ----
 let fetchImpl = (typeof globalThis !== 'undefined' && globalThis.fetch) ? globalThis.fetch : null;
 if (!fetchImpl) {
@@ -73,12 +80,14 @@ function getCompoundKeywordsFromTokens(tokens){
     const isProper = t.pos_detail_1 === '固有名詞';
     const isKatakana = /^[\u30A0-\u30FF]+$/.test(sf);
     const isAlphaNum = /^[A-Za-z0-9\-\_]+$/.test(sf);
-    const isAllowed = (isNoun || isKatakana || isAlphaNum || isProper) && t.pos_detail_1 !== '代名詞';
+    // 助詞「の」「は」も連結対象とする
+    const isAllowed = (isNoun || isKatakana || isAlphaNum || isProper) || (t.pos === '助詞' && (sf === 'の' || sf === 'は'));
     if (isAllowed) buf.push(sf);
     else pushBuf();
   }
   pushBuf();
-  return Array.from(new Set(keywords)).sort((a, b) => b.length - a.length);
+  // 連結されたキーワードをソートし、文字数が1以下のものを除外
+  return Array.from(new Set(keywords.filter(k => k.length > 1))).sort((a, b) => b.length - a.length);
 }
 
 // ---- コア参照（簡易） ----
@@ -214,6 +223,16 @@ async function getBotResponse(userId, userMessage, opts = {}){
 
   pushHistory(ctx, 'user', userMessage);
 
+  // 知識ベースから応答を検索
+  for (const k in knowledgeBase) {
+    if (userMessage.includes(k)) {
+      const reply = knowledgeBase[k];
+      pushHistory(ctx, 'bot', reply);
+      contextMap.set(userId, ctx);
+      return { text: reply, meta: { mode: 'knowledge-base' } };
+    }
+  }
+
   const intent = detectIntent(userMessage);
 
   if (intent === 'greeting') {
@@ -225,14 +244,6 @@ async function getBotResponse(userId, userMessage, opts = {}){
     const r = choose(['どういたしまして！','いつでも聞いてね。']);
     pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
     return { text: r, meta: { mode: 'thanks' } };
-  }
-
-  // 「日本の首都」への直接応答を追加 (修正箇所)
-  if (userMessage.includes('日本の首都')) {
-    const reply = '日本の首都は東京です。';
-    pushHistory(ctx, 'bot', reply); 
-    contextMap.set(userId, ctx);
-    return { text: reply, meta: { mode: 'direct-answer' } };
   }
 
   let tokens = [];
