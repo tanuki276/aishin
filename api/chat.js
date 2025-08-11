@@ -1,4 +1,6 @@
- handler）
+
+//  - 初回ウェルカムを返す init フラグを追加（?init=1 または POST { "init": true }）
+
 const path = require('path');
 const fs = require('fs');
 
@@ -115,7 +117,6 @@ async function tryWikipedia(keyword){
     const opJson = await opRes.json();
     const titles = opJson && opJson[1] ? opJson[1] : [];
     for (const t of titles){
-      // REST summary の方が扱いやすい
       const sumUrl = `https://ja.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(t)}`;
       const sres = await fetchImpl(sumUrl);
       if (!sres.ok) continue;
@@ -158,7 +159,6 @@ async function getJoke(){
     const j = await res.json();
     if (j && j.setup) return { source: 'joke', text: `${j.setup} — ${j.punchline || ''}`.trim() };
   } catch(e){ }
-  // fallback: Advice Slip をジョーク代用
   try {
     const r2 = await fetchImpl('https://api.adviceslip.com/advice');
     if (r2.ok){
@@ -181,18 +181,16 @@ async function getAdvice(){
   return null;
 }
 
-// ---- 天気（Nominatim を使ったジオコーディング + Open-Meteo） ----
+// ---- 天気（Nominatim + Open-Meteo） ----
 async function getWeatherForPlace(place){
   if (!fetchImpl || !place) return null;
   try {
-    // Nominatim geocoding
     const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(place)}&limit=1`;
     const nom = await fetchImpl(nomUrl, { headers: { 'User-Agent': 'vercel-chat-example/1.0' }});
     if (!nom.ok) return null;
     const nomj = await nom.json();
     if (!nomj || !nomj[0]) return null;
     const lat = parseFloat(nomj[0].lat), lon = parseFloat(nomj[0].lon), display = nomj[0].display_name;
-    // Open-Meteo current weather
     const meto = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&timezone=auto`;
     const mres = await fetchImpl(meto);
     if (!mres.ok) return null;
@@ -268,9 +266,8 @@ async function getBotResponse(userId, userMessage, opts = {}){
 
   console.log('[getBotResponse] userId=', userId, 'intent=', intent, 'candidates=', candidates);
 
-  // 1) 天気要求なら天気APIを試す（キーワードから地名を推定）
+  // 1) 天気要求
   if (intent === 'weather' || /天気|気温|雨|晴れ|降水/.test(userMessage)){
-    // try candidate place names first
     for (const cand of candidates){
       if (!cand) continue;
       const w = await getWeatherForPlace(cand);
@@ -284,7 +281,6 @@ async function getBotResponse(userId, userMessage, opts = {}){
         return { text: reply, meta: {source:w.source, usedKeyword:cand} };
       }
     }
-    // fallback: try to parse a place token from message (simple)
     const placeMatch = userMessage.match(/([^\s　]+市|都|道|府|県|町|村|区|東京|大阪|京都)/);
     if (placeMatch){
       const w2 = await getWeatherForPlace(placeMatch[0]);
@@ -294,7 +290,6 @@ async function getBotResponse(userId, userMessage, opts = {}){
         return { text: reply, meta: {source:w2.source, usedKeyword:placeMatch[0]} };
       }
     }
-    // couldn't get weather
     const r = 'ごめん、場所の特定ができなかったか、天気情報を取得できませんでした。地名を教えてもらえる？';
     pushHistory(ctx,'bot',r); contextMap.set(userId, ctx);
     return { text: r, meta: { mode: 'weather-failed' } };
@@ -310,10 +305,9 @@ async function getBotResponse(userId, userMessage, opts = {}){
     if (a){ pushHistory(ctx,'bot',a.text); contextMap.set(userId,ctx); return { text: a.text, meta:{source:a.source} }; }
   }
 
-  // 3) Wikipedia / DuckDuckGo 検索（固有名詞・名詞があれば）
+  // 3) Wikipedia / DuckDuckGo 検索
   for (const cand of candidates){
     if (!cand || String(cand).trim().length===0) continue;
-    // Wikipedia優先（日本語）
     const wiki = await tryWikipedia(cand);
     if (wiki){
       ctx.lastKeyword = cand;
@@ -323,7 +317,6 @@ async function getBotResponse(userId, userMessage, opts = {}){
       pushHistory(ctx,'bot',reply); contextMap.set(userId,ctx);
       return { text: reply, meta: {source: wiki.source, title: wiki.title} };
     }
-    // DuckDuckGo（汎用）
     const ddg = await tryDuckDuckGo(cand);
     if (ddg){
       ctx.lastKeyword = cand;
@@ -335,16 +328,14 @@ async function getBotResponse(userId, userMessage, opts = {}){
     }
   }
 
-  // 4) 質問っぽいなら一般応答（雑談を豊かに）
+  // 4) 質問っぽいなら一般応答
   if (intent === 'question' || /どう|なぜ|なに|どの|いつ|どこ/.test(userMessage)){
-    // Try one last wide search with the whole message
     const ddgWhole = await tryDuckDuckGo(userMessage);
     if (ddgWhole){
       const r = `${ddgWhole.title} に関する情報です： ${ddgWhole.text} もっと詳しく？`;
       pushHistory(ctx,'bot',r); contextMap.set(userId,ctx);
       return { text: r, meta:{source: ddgWhole.source} };
     }
-    // fallback: intelligent smalltalk-like answer
     const fallbackQ = choose([
       'いい質問だね…少し考えさせて。',
       'その点については色々な見方があるよ。具体的にはどの部分が気になる？',
@@ -361,6 +352,21 @@ async function getBotResponse(userId, userMessage, opts = {}){
   return { text: s, meta:{mode:'smalltalk', persona} };
 }
 
+// ---- helper: 受信メッセージが直近のbotの発話と一致するか（エコー判定） ----
+function isEchoMessage(userId, message){
+  if (!message) return false;
+  const ctx = contextMap.get(userId);
+  if (!ctx || !ctx.history || ctx.history.length === 0) return false;
+  // find last bot message
+  for (let i = ctx.history.length - 1; i >= 0; i--){
+    const item = ctx.history[i];
+    if (item.role === 'bot' && item.text){
+      return String(item.text).trim() === String(message).trim();
+    }
+  }
+  return false;
+}
+
 // ---- Vercel / serverless handler ----
 module.exports = async (req, res) => {
   // CORS
@@ -371,36 +377,46 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
+    // parse body (if POST)
+    let body = {};
+    if (req.method === 'POST') {
+      body = typeof req.body === 'object' ? req.body : (req.body ? JSON.parse(req.body) : {});
+    }
+
     // accept JSON body (POST) or query param (GET)
     let userId = null;
     let message = null;
+    let wantInit = false;
+
     if (req.method === 'POST') {
-      const body = typeof req.body === 'object' ? req.body : (req.body ? JSON.parse(req.body) : {});
       userId = body && body.userId ? String(body.userId) : (body && body.user && body.user.id ? String(body.user.id) : null);
-      message = body && body.message ? String(body.message) : null;
+      message = body && (typeof body.message !== 'undefined') ? (body.message === null ? '' : String(body.message)) : null;
+      wantInit = !!body.init;
     } else {
-      // GET fallback for quick test
       userId = req.query && req.query.userId ? String(req.query.userId) : (req.query && req.query.user ? String(req.query.user) : 'anon');
-      message = req.query && req.query.message ? String(req.query.message) : req.query.q || null;
+      message = req.query && (typeof req.query.message !== 'undefined') ? String(req.query.message) : (req.query.q || null);
+      wantInit = req.query && (req.query.init === '1' || req.query.init === 'true' || req.query.welcome === '1');
     }
 
-    if (!message) return res.status(400).json({ error: 'message (or q) is required' });
     if (!userId) userId = 'anon';
 
-    const start = Date.now();
-    const result = await getBotResponse(userId, message, { persona: req.query && req.query.persona ? req.query.persona : undefined });
-    const took = Date.now() - start;
+    // Echo-guard: 受信メッセージが直近のbot発話と同じなら無視する
+    if (isEchoMessage(userId, message)) {
+      console.log('Ignored echo message for userId=', userId);
+      return res.status(200).json({ ignored: true, reason: 'echo' });
+    }
 
-    // normalized response
-    const responseBody = {
-      reply: result && result.text ? result.text : 'すみません、応答できませんでした。',
-      meta: result.meta || {},
-      took_ms: took
-    };
-    return res.status(200).json(responseBody);
+    // If client requests initial welcome (init) OR there is no context yet and client asked for welcome,
+    // return welcome message "何か質問はありますか？"
+    const existingCtx = contextMap.get(userId);
+    if (wantInit || (!existingCtx || !existingCtx.history || existingCtx.history.length === 0) && wantInit) {
+      const welcome = '何か質問はありますか？';
+      const now = nowTs();
+      const ctx = existingCtx || { history: [], persona: 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
+      pushHistory(ctx, 'bot', welcome);
+      contextMap.set(userId, ctx);
+      return res.status(200).json({ reply: welcome, meta: { welcome: true } });
+    }
 
-  } catch (err) {
-    console.error('handler error', err && err.stack ? err.stack : err);
-    return res.status(500).json({ error: 'Internal Server Error', detail: err && err.message ? err.message : String(err) });
-  }
-};
+    // if no message provided (and not init), complain
+    if (!message) return res.status(400).json({ error: 'message (or q) is required. To get welcome
