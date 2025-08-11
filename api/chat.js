@@ -1,4 +1,4 @@
-// --- 変更なしの既存部分 ---
+// --- 既存のコード（変更なし） ---
 const path = require('path');
 const fs = require('fs');
 const kuromoji = require('kuromoji');
@@ -232,7 +232,7 @@ const smalltalkPools = {
 };
 function smalltalk(mode='neutral'){ return choose(smalltalkPools[mode] || smalltalkPools.neutral); }
 
-// --- 変更ここから ---
+// --- getBotResponse関数の変更 ---
 async function getBotResponse(userId, userMessage, opts = {}){
   await initTokenizer;
 
@@ -269,6 +269,18 @@ async function getBotResponse(userId, userMessage, opts = {}){
     return { text: r, meta: { mode: 'thanks' } };
   }
 
+  // ---- STEP 1: Kuromojiを使わずに、入力全体でWeb検索を試みる ----
+  const ddgResult = await tryDuckDuckGo(userMessage);
+  if (ddgResult) {
+      ctx.lastKeyword = userMessage;
+      ctx.lastEntities.unshift({ title: ddgResult.title, ts: now });
+      if (ctx.lastEntities.length > 10) ctx.lastEntities.pop();
+      const reply = `ちょっと調べたら、「${ddgResult.title}」に関する情報が見つかりました：${ddgResult.text}。どうでしょうか？`;
+      pushHistory(ctx, 'bot', reply); contextMap.set(userId, ctx);
+      return { text: reply, meta: { source: ddgResult.source, title: ddgResult.title, usedQuery: userMessage } };
+  }
+  
+  // ---- ここからKuromojiを使った検索（以前のロジック） ----
   if (intent === 'recipe') {
     const recipeKeywords = getCompoundKeywordsFromTokens(tokenizer.tokenize(userMessage)).filter(k => !/(作り方|レシピ|材料|献立|調理法)/.test(k));
     const query = recipeKeywords.length > 0 ? recipeKeywords.join(' ') : userMessage;
@@ -304,28 +316,20 @@ async function getBotResponse(userId, userMessage, opts = {}){
   }
   const extractedKeywords = getCompoundKeywordsFromTokens(tokens).filter(k => k.length > 1);
 
-  // 検索クエリの優先順位リスト
   const searchQueries = [];
-  // 1. 入力全体
-  searchQueries.push(userMessage);
-  // 2. 複数のキーワードをスペースで結合
   if (extractedKeywords.length > 1) {
     searchQueries.push(extractedKeywords.join(' '));
   }
-  // 3. 個々のキーワード
   searchQueries.push(...extractedKeywords);
 
-  // コア参照を解決し、検索クエリに追加
   const coref = resolveCoref(userMessage, ctx);
   if (coref) {
       const corefQuery = `${coref} ${extractedKeywords.join(' ')}`.trim();
       searchQueries.unshift(corefQuery);
   }
 
-  // 重複を削除して、優先順位通りに検索を試みる
   const uniqueQueries = [...new Set(searchQueries)].filter(q => q.length > 0);
 
-  // 天気検索
   if (intent === 'weather') {
     for (const q of uniqueQueries) {
       const w = await getWeatherForPlace(q);
@@ -340,9 +344,7 @@ async function getBotResponse(userId, userMessage, opts = {}){
     }
   }
 
-  // 一般検索
   for (const q of uniqueQueries) {
-    // Wikipediaを試す
     const wiki = await tryWikipedia(q);
     if (wiki) {
       ctx.lastKeyword = q;
@@ -353,7 +355,6 @@ async function getBotResponse(userId, userMessage, opts = {}){
       return { text: reply, meta: { source: wiki.source, title: wiki.title, usedQuery: q } };
     }
 
-    // DuckDuckGoを試す
     const ddg = await tryDuckDuckGo(q);
     if (ddg) {
       ctx.lastKeyword = q;
@@ -365,8 +366,6 @@ async function getBotResponse(userId, userMessage, opts = {}){
     }
   }
 
-  // どの検索も失敗した場合
-  // 抽出されたキーワードがある場合は、それを基に回答を試みる
   if (extractedKeywords.length > 0) {
     const keywords = extractedKeywords.join('、');
     const reply = `すみません、「${keywords}」に関する情報をうまく見つけることができませんでした。質問の内容を変えていただけますか？`;
@@ -374,93 +373,4 @@ async function getBotResponse(userId, userMessage, opts = {}){
     return { text: reply, meta: { mode: 'search_fail', keywords: extractedKeywords } };
   }
 
-  const persona = ctx.persona || 'neutral';
-  const s = smalltalk(persona);
-  pushHistory(ctx, 'bot', s); contextMap.set(userId, ctx);
-  return { text: s, meta: { mode: 'smalltalk', persona } };
-}
-
-// --- 変更ここから ---
-
-function isEchoMessage(userId, message){
-  if (!message) return false;
-  const ctx = contextMap.get(userId);
-  if (!ctx || !ctx.history || ctx.history.length === 0) return false;
-  for (let i = ctx.history.length - 1; i >= 0; i--){
-    const item = ctx.history[i];
-    if (item.role === 'bot' && item.text) {
-      return String(item.text).trim() === String(message).trim();
-    }
-  }
-  return false;
-}
-
-module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') return res.status(200).end();
-
-  try {
-    let body = {};
-    if (req.method === 'POST') {
-      body = typeof req.body === 'object' ? req.body : (req.body ? JSON.parse(req.body) : {});
-    }
-
-    let userId = null;
-    let message = null;
-    let wantInit = false;
-
-    if (req.method === 'POST') {
-      userId = body && body.userId ? String(body.userId) : (body && body.user && body.user.id ? String(body.user.id) : 'anon');
-      message = (typeof body.message !== 'undefined') ? (body.message === null ? '' : String(body.message)) : null;
-      wantInit = !!body.init;
-    } else {
-      userId = req.query && req.query.userId ? String(req.query.userId) : (req.query && req.query.user ? String(req.query.user) : 'anon');
-      message = (typeof req.query.message !== 'undefined') ? String(req.query.message) : (req.query.q || null);
-      wantInit = req.query && (req.query.init === '1' || req.query.init === 'true' || req.query.welcome === '1');
-    }
-
-    if (!userId) userId = 'anon';
-
-    if (isEchoMessage(userId, message)) {
-      console.log('Ignored echo message for userId=', userId);
-      const resp = { reply: '', text: '', ignored: true, reason: 'echo' };
-      return res.status(200).json(resp);
-    }
-
-    if (wantInit) {
-      const welcome = '何か質問はありますか？';
-      const now = nowTs();
-      const ctx = contextMap.get(userId) || { history: [], persona: 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
-      pushHistory(ctx, 'bot', welcome);
-      contextMap.set(userId, ctx);
-      return res.status(200).json({ reply: welcome, text: welcome, meta: { welcome: true } });
-    }
-
-    if (!message) {
-      return res.status(400).json({
-        reply: '',
-        text: '',
-        error: 'message (or q) is required. To get welcome, provide init=true or send a message.'
-      });
-    }
-
-    const start = Date.now();
-    const result = await getBotResponse(userId, message, { persona: req.query && req.query.persona ? req.query.persona : undefined });
-    const took = Date.now() - start;
-    const replyText = result && result.text ? result.text : 'すみません、応答できませんでした。';
-    const responseBody = {
-      reply: replyText,
-      text: replyText,
-      meta: result && result.meta ? result.meta : {},
-      took_ms: took
-    };
-    return res.status(200).json(responseBody);
-
-  } catch (err) {
-    console.error('handler error', err && err.stack ? err.stack : err);
-    return res.status(500).json({ reply: '', text: '', error: 'Internal Server Error', detail: err && err.message ? err.message : String(err) });
-  }
-};
+  const persona = ctx.persona
