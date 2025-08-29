@@ -1,14 +1,4 @@
 {
-  "rewrites": [
-    {
-      "source": "/data/:match*",
-      "destination": "/data/:match*"
-    },
-    {
-      "source": "/dict/:match*",
-      "destination": "/dict/:match*"
-    }
-  ],
   "builds": [
     {
       "src": "public/index.html",
@@ -18,12 +8,10 @@
   "routes": [
     {
       "src": "/data/(.*)",
-      "headers": { "cache-control": "s-maxage=1, stale-while-revalidate" },
       "dest": "/data/$1"
     },
     {
       "src": "/dict/(.*)",
-      "headers": { "cache-control": "s-maxage=1, stale-while-revalidate" },
       "dest": "/dict/$1"
     },
     {
