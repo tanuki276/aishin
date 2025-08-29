@@ -1,97 +1,108 @@
-let userId = 'user_' + Math.random().toString(36).substr(2, 9);
-const apiEndpoint = '/api/chat';
+// --- グローバル変数 ---
+let kanjiDict = {};
+let kanaDict = {};
+let grammarList = [];
+let tokenizer = null;
 
-// UI要素の取得
-const chatInput = document.getElementById('user-input');
-const sendButton = document.getElementById('send-button');
-const chatMessages = document.getElementById('chat-messages');
+// --- DOM要素 ---
+const $ = id => document.getElementById(id);
+const convertBtn = $('convert');
+const statusMessage = $('status-message');
 
-// 初期状態でチャット機能を無効化
-chatInput.disabled = true;
-sendButton.disabled = true;
-chatInput.placeholder = "ボットの準備中です。少々お待ちください...";
-
-// メッセージをチャット画面に追加する関数
-function addMessageToChat(sender, message) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${sender}-message`;
-    messageDiv.innerHTML = `<span class="bubble">${message}</span>`;
-    chatMessages.appendChild(messageDiv);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-// 初回メッセージ（準備中）をボットから送信
-addMessageToChat("bot", "ボットを起動しています。準備ができるまでお待ちください...");
-
-// APIからの初回応答を待つための関数
-async function initializeChat() {
+// --- ユーザー辞書の読み込み ---
+async function loadUserDicts() {
     try {
-        // APIに起動フラグ（init: true）を送信
-        const response = await fetch(apiEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                userId: userId,
-                init: true // 起動フラグを追加
-            })
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            // 準備完了後、UIを有効化
-            chatInput.disabled = false;
-            sendButton.disabled = false;
-            chatInput.placeholder = "メッセージを入力...";
-            // 初回応答を表示
-            // サーバーからの応答キーを `data.reply` に修正
-            addMessageToChat("bot", data.reply);
-        } else {
-            const errorData = await response.json();
-            addMessageToChat("bot", `エラーが発生しました: ${errorData.error}`);
-        }
-    } catch (error) {
-        console.error('API request failed:', error);
-        addMessageToChat("bot", "サーバーとの通信に失敗しました。ページをリロードしてください。");
+        const [kanjiRes, kanaRes, grammarRes] = await Promise.all([
+            fetch('./data/kanji.json').then(res => res.json()),
+            fetch('./data/kana.json').then(res => res.json()),
+            fetch('./data/grammar.json').then(res => res.json()),
+        ]);
+        kanjiDict = kanjiRes;
+        kanaDict = kanaRes;
+        grammarList = grammarRes;
+        statusMessage.textContent = 'ユーザー辞書の読み込みが完了しました。';
+    } catch (e) {
+        statusMessage.textContent = 'エラー: ユーザー辞書ファイルの読み込みに失敗しました。`./data/`フォルダにJSONファイルがあるか確認してください。';
+        console.error(e);
     }
 }
 
-// ページ読み込み時にチャットの初期化を開始
-window.onload = initializeChat;
+// --- 形態素解析器の初期化 ---
+async function initTokenizer() {
+    statusMessage.textContent = 'Kuromoji.js辞書を初期化中...';
+    return new Promise((resolve, reject) => {
+        kuromoji.builder({ dicPath: "./dict/" }).build((err, _tokenizer) => {
+            if(err) {
+                statusMessage.textContent = 'エラー: Kuromojiの辞書初期化に失敗しました。`./dict/`に辞書データがあるか確認してください。';
+                reject(err);
+            } else {
+                tokenizer = _tokenizer;
+                statusMessage.textContent = '準備完了です。テキストを入力してください。';
+                convertBtn.disabled = false;
+                resolve();
+            }
+        });
+    });
+}
 
-// イベントリスナー
-document.getElementById('send-button').addEventListener('click', sendMessage);
-document.getElementById('user-input').addEventListener('keypress', function(e) {
-    if (e.key === 'Enter' && !chatInput.disabled) {
-        sendMessage();
-    }
+// --- 変換エンジン ---
+function convertText(src) {
+    if (!src) return '';
+    let result = '';
+    const tokens = tokenizer.tokenize(src);
+
+    tokens.forEach(token => {
+        let surface = token.surface;
+        let converted = surface;
+
+        // 1. 形態素解析の読みを元に仮名辞書を適用
+        if ($('opt-kana').checked && kanaDict[token.reading]) {
+            converted = kanaDict[token.reading];
+        } else if ($('opt-kana').checked && kanaDict[converted]) {
+            converted = kanaDict[converted];
+        }
+
+        // 2. 漢字辞書を適用
+        if ($('opt-kanji').checked && kanjiDict[token.surface]) {
+            converted = kanjiDict[token.surface];
+        }
+
+        // 3. 文法辞書を適用（正規表現）
+        if ($('opt-grammar').checked) {
+            grammarList.forEach(g => {
+                try {
+                    const re = new RegExp(g.from, 'g');
+                    converted = converted.replace(re, g.to);
+                } catch (e) {
+                    console.error('無効な正規表現:', g.from, e);
+                }
+            });
+        }
+        result += converted;
+    });
+    return result;
+}
+
+// --- イベントハンドラ ---
+document.addEventListener('DOMContentLoaded', async () => {
+    await initTokenizer();
+    await loadUserDicts();
+
+    $('convert').onclick = () => {
+        $('output').value = convertText($('input').value);
+    };
+    $('clear').onclick = () => {
+        $('input').value = '';
+        $('output').value = '';
+    };
+    $('swap').onclick = () => {
+        const t = $('input').value;
+        $('input').value = $('output').value;
+        $('output').value = t;
+    };
+    $('load-sample').onclick = () => {
+        const sample = '今日は私の國學の話をします。私はおもいを語り、明日は學校へ行きます。';
+        $('input').value = sample;
+        $('output').value = convertText(sample);
+    };
 });
-
-async function sendMessage() {
-    const userMessage = chatInput.value.trim();
-    if (userMessage === '') return;
-
-    addMessageToChat("user", userMessage);
-    chatInput.value = '';
-
-    try {
-        const response = await fetch(apiEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                userId: userId,
-                message: userMessage
-            })
-        });
-
-        const data = await response.json();
-        if (response.ok) {
-            // サーバーからの応答キーを `data.reply` に修正
-            addMessageToChat("bot", data.reply);
-        } else {
-            addMessageToChat("bot", `エラーが発生しました: ${data.error}`);
-        }
-    } catch (error) {
-        console.error('API request failed:', error);
-        addMessageToChat("bot", "サーバーとの通信に失敗しました。");
-    }
-}
