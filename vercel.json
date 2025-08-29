@@ -15,8 +15,8 @@
       "dest": "/dict/$1"
     },
     {
-      "src": "/public/(.*)",
-      "dest": "/$1"
+      "src": "/(.*)",
+      "dest": "/public/$1"
     }
   ]
 }
