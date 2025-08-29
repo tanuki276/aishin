@@ -1,7 +1,7 @@
 // --- グローバル変数 ---
 let kanjiDict = {};
 let kanaDict = {};
-let grammarList = [];
+let grammarList = {};
 let tokenizer = null;
 
 // --- DOM要素 ---
