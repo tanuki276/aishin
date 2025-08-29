@@ -1,15 +1,34 @@
 {
-  "functions": {
-    "api/chat.js": {
-      "memory": 1024,
-      "maxDuration": 60,
-      "includeFiles": "dict/**/*"
-    }
-  },
   "rewrites": [
     {
-      "source": "/api/chat",
-      "destination": "/api/chat.js"
+      "source": "/data/:match*",
+      "destination": "/data/:match*"
+    },
+    {
+      "source": "/dict/:match*",
+      "destination": "/dict/:match*"
+    }
+  ],
+  "builds": [
+    {
+      "src": "public/index.html",
+      "use": "@vercel/static-build"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/data/(.*)",
+      "headers": { "cache-control": "s-maxage=1, stale-while-revalidate" },
+      "dest": "/data/$1"
+    },
+    {
+      "src": "/dict/(.*)",
+      "headers": { "cache-control": "s-maxage=1, stale-while-revalidate" },
+      "dest": "/dict/$1"
+    },
+    {
+      "src": "/public/(.*)",
+      "dest": "/$1"
     }
   ]
 }
