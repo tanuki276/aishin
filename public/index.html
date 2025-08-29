@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>旧日本語変換ツール</title>
+  <title>旧日本語変換</title>
   <style>
     :root{--bg:#0f1724;--card:#0b1220;--muted:#9aa4b2;--accent:#f59e0b}
     body{font-family: "Noto Sans JP", system-ui, -apple-system, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif; background:linear-gradient(180deg,#071021 0%, #071827 100%); color:#e6eef6; margin:0; padding:18px}
     h1{font-size:20px;margin:0 0 8px}
     .wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:14px;border-radius:10px;box-shadow:0 6px 20px rgba(2,6,23,0.6)}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:14px;border-radius:10px;box-shadow:0 6bpx 20px rgba(2,6,23,0.6)}
     textarea{width:100%;height:320px;background:transparent;border:1px solid rgba(255,255,255,0.06);color:inherit;padding:10px;border-radius:6px;font-size:15px;resize:vertical}
     .controls{display:flex;gap:8px;align-items:center;margin-top:10px}
     button{background:var(--accent);border:none;color:#071021;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:700}
@@ -32,8 +32,8 @@
 <body>
   <div class="topbar">
     <div>
-      <h1>旧日本語変換ツール</h1>
-      <div class="muted">変換</div>
+      <h1>旧日本語変換</h1>
+      <div class="muted">現代日本語から旧日本語に変換できます</div>
     </div>
     <div class="options">
       <label class="small muted">自動変換:</label>
@@ -62,9 +62,10 @@
       <strong>出力（旧日本語）</strong>
       <textarea id="output" readonly placeholder="変換結果がここに表示されます"></textarea>
       <div class="notice" style="margin-top:12px;">
+        ※ 辞書は`./data/`フォルダから自動で読み込まれます。
       </div>
     </div>
   </div>
-  <script src="public/main.js"></script>
+  <script src="./js/main.js"></script>
 </body>
 </html>
