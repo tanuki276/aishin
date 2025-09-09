@@ -27,13 +27,15 @@ async function loadUserDicts() {
     }
 }
 
-// --- 形態素解析器の初期化 ---
+// --- 形態素解析器の初期化（サーバーレス経由） ---
 async function initTokenizer() {
     statusMessage.textContent = 'Kuromoji.js辞書を初期化中...';
     return new Promise((resolve, reject) => {
-        kuromoji.builder({ dicPath: "/dict/" }).build((err, _tokenizer) => {
-            if(err) {
-                statusMessage.textContent = 'エラー: Kuromojiの辞書初期化に失敗しました。`/dict/`に辞書データがあるか確認してください。';
+        kuromoji.builder({
+            dicPath: '/api/abcd?file='  // サーバーレス経由で辞書ファイルを取得
+        }).build((err, _tokenizer) => {
+            if (err) {
+                statusMessage.textContent = 'エラー: Kuromojiの辞書初期化に失敗しました。サーバーレスAPIが正しく動作しているか確認してください。';
                 reject(err);
             } else {
                 tokenizer = _tokenizer;
