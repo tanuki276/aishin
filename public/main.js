@@ -9,20 +9,20 @@ const $ = id => document.getElementById(id);
 const convertBtn = $('convert');
 const statusMessage = $('status-message');
 
-// --- ユーザー辞書の読み込み ---
+// --- ユーザー辞書の読み込み（サーバーレス経由） ---
 async function loadUserDicts() {
     try {
         const [kanjiRes, kanaRes, grammarRes] = await Promise.all([
-            fetch('./data/kanji.json').then(res => res.json()),
-            fetch('./data/kana.json').then(res => res.json()),
-            fetch('./data/grammar.json').then(res => res.json()),
+            fetch('/api/abcd?type=data&file=kanji.json').then(res => res.json()),
+            fetch('/api/abcd?type=data&file=kana.json').then(res => res.json()),
+            fetch('/api/abcd?type=data&file=grammar.json').then(res => res.json()),
         ]);
         kanjiDict = kanjiRes;
         kanaDict = kanaRes;
         grammarList = grammarRes;
         statusMessage.textContent = 'ユーザー辞書の読み込みが完了しました。';
     } catch (e) {
-        statusMessage.textContent = 'エラー: ユーザー辞書ファイルの読み込みに失敗しました。`./data/`フォルダにJSONファイルがあるか確認してください。';
+        statusMessage.textContent = 'エラー: ユーザー辞書ファイルの読み込みに失敗しました。サーバーレスAPIが正しく動作しているか確認してください。';
         console.error(e);
     }
 }
@@ -32,7 +32,7 @@ async function initTokenizer() {
     statusMessage.textContent = 'Kuromoji.js辞書を初期化中...';
     return new Promise((resolve, reject) => {
         kuromoji.builder({
-            dicPath: '/api/abcd?file='  // サーバーレス経由で辞書ファイルを取得
+            dicPath: '/api/abcd?type=dict&file='  // dict gz をサーバーレス経由で取得
         }).build((err, _tokenizer) => {
             if (err) {
                 statusMessage.textContent = 'エラー: Kuromojiの辞書初期化に失敗しました。サーバーレスAPIが正しく動作しているか確認してください。';
