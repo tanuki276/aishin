@@ -1,29 +1,34 @@
-// --- 変換エンジン ---
+// --- 変換エンジン（サーバーレス対応、安全版） ---
 function convertText(src) {
     if (!src || !tokenizer) return '';
+
     let result = '';
-    const tokens = tokenizer.tokenize(src);
+    let tokens;
+    try {
+        tokens = tokenizer.tokenize(src);
+    } catch (e) {
+        console.error('Tokenizer 未初期化または無効な入力:', e);
+        return src; // 元の文字列を返す
+    }
 
     tokens.forEach(token => {
-        let surface = token.surface || '';
+        const surface = token?.surface || '';
         let converted = surface;
 
-        // 1. 形態素解析の読みを元に仮名辞書を適用
-        if ($('opt-kana').checked && token.reading && kanaDict[token.reading]) {
-            converted = kanaDict[token.reading] || converted;
-        } else if ($('opt-kana').checked && kanaDict[converted]) {
-            converted = kanaDict[converted] || converted;
+        // 1. 仮名辞書適用
+        if ($('opt-kana').checked && token?.reading) {
+            converted = kanaDict[token.reading] || kanaDict[converted] || converted;
         }
 
-        // 2. 漢字辞書を適用
-        if ($('opt-kanji').checked && kanjiDict[token.surface]) {
+        // 2. 漢字辞書適用
+        if ($('opt-kanji').checked) {
             converted = kanjiDict[token.surface] || converted;
         }
 
-        // 3. 文法辞書を適用（正規表現）
+        // 3. 文法辞書適用（正規表現）
         if ($('opt-grammar').checked && Array.isArray(grammarList)) {
             grammarList.forEach(g => {
-                if (!g || !g.from || !g.to) return; // undefined 回避
+                if (!g?.from || !g?.to) return;
                 try {
                     const re = new RegExp(g.from, 'g');
                     converted = converted.replace(re, g.to);
@@ -33,7 +38,7 @@ function convertText(src) {
             });
         }
 
-        result += converted || '';
+        result += converted;
     });
 
     return result;
