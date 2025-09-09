@@ -1,77 +1,29 @@
-// --- グローバル変数 ---
-let kanjiDict = {};
-let kanaDict = {};
-let grammarList = {};
-let tokenizer = null;
-
-// --- DOM要素 ---
-const $ = id => document.getElementById(id);
-const convertBtn = $('convert');
-const statusMessage = $('status-message');
-
-// --- ユーザー辞書の読み込み（サーバーレス経由） ---
-async function loadUserDicts() {
-    try {
-        const [kanjiRes, kanaRes, grammarRes] = await Promise.all([
-            fetch('/api/abcd?type=data&file=kanji.json').then(res => res.json()),
-            fetch('/api/abcd?type=data&file=kana.json').then(res => res.json()),
-            fetch('/api/abcd?type=data&file=grammar.json').then(res => res.json()),
-        ]);
-        kanjiDict = kanjiRes;
-        kanaDict = kanaRes;
-        grammarList = grammarRes;
-        statusMessage.textContent = 'ユーザー辞書の読み込みが完了しました。';
-    } catch (e) {
-        statusMessage.textContent = 'エラー: ユーザー辞書ファイルの読み込みに失敗しました。サーバーレスAPIが正しく動作しているか確認してください。';
-        console.error(e);
-    }
-}
-
-// --- 形態素解析器の初期化（サーバーレス経由） ---
-async function initTokenizer() {
-    statusMessage.textContent = 'Kuromoji.js辞書を初期化中...';
-    return new Promise((resolve, reject) => {
-        kuromoji.builder({
-            dicPath: '/api/abcd?type=dict&file='  // dict gz をサーバーレス経由で取得
-        }).build((err, _tokenizer) => {
-            if (err) {
-                statusMessage.textContent = 'エラー: Kuromojiの辞書初期化に失敗しました。サーバーレスAPIが正しく動作しているか確認してください。';
-                reject(err);
-            } else {
-                tokenizer = _tokenizer;
-                statusMessage.textContent = '準備完了です。テキストを入力してください。';
-                convertBtn.disabled = false;
-                resolve();
-            }
-        });
-    });
-}
-
 // --- 変換エンジン ---
 function convertText(src) {
-    if (!src) return '';
+    if (!src || !tokenizer) return '';
     let result = '';
     const tokens = tokenizer.tokenize(src);
 
     tokens.forEach(token => {
-        let surface = token.surface;
+        let surface = token.surface || '';
         let converted = surface;
 
         // 1. 形態素解析の読みを元に仮名辞書を適用
-        if ($('opt-kana').checked && kanaDict[token.reading]) {
-            converted = kanaDict[token.reading];
+        if ($('opt-kana').checked && token.reading && kanaDict[token.reading]) {
+            converted = kanaDict[token.reading] || converted;
         } else if ($('opt-kana').checked && kanaDict[converted]) {
-            converted = kanaDict[converted];
+            converted = kanaDict[converted] || converted;
         }
 
         // 2. 漢字辞書を適用
         if ($('opt-kanji').checked && kanjiDict[token.surface]) {
-            converted = kanjiDict[token.surface];
+            converted = kanjiDict[token.surface] || converted;
         }
 
         // 3. 文法辞書を適用（正規表現）
-        if ($('opt-grammar').checked) {
+        if ($('opt-grammar').checked && Array.isArray(grammarList)) {
             grammarList.forEach(g => {
+                if (!g || !g.from || !g.to) return; // undefined 回避
                 try {
                     const re = new RegExp(g.from, 'g');
                     converted = converted.replace(re, g.to);
@@ -80,31 +32,9 @@ function convertText(src) {
                 }
             });
         }
-        result += converted;
+
+        result += converted || '';
     });
+
     return result;
 }
-
-// --- イベントハンドラ ---
-document.addEventListener('DOMContentLoaded', async () => {
-    await initTokenizer();
-    await loadUserDicts();
-
-    $('convert').onclick = () => {
-        $('output').value = convertText($('input').value);
-    };
-    $('clear').onclick = () => {
-        $('input').value = '';
-        $('output').value = '';
-    };
-    $('swap').onclick = () => {
-        const t = $('input').value;
-        $('input').value = $('output').value;
-        $('output').value = t;
-    };
-    $('load-sample').onclick = () => {
-        const sample = '今日は私の國學の話をします。私はおもいを語り、明日は學校へ行きます。';
-        $('input').value = sample;
-        $('output').value = convertText(sample);
-    };
-});
