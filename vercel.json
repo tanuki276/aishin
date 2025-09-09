@@ -2,18 +2,18 @@
   "routes": [
     {
       "src": "/data/(.*)",
-      "dest": "/public/data/$1"
+      "dest": "/data/$1"
     },
     {
       "src": "/dict/(.*)",
-      "dest": "/public/dict/$1",
+      "dest": "/dict/$1",
       "headers": {
         "Cache-Control": "public, max-age=0, must-revalidate"
       }
     },
     {
       "src": "/(.*)",
-      "dest": "/public/$1"
+      "dest": "/$1"
     }
   ]
 }
