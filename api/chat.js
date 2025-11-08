@@ -1,6 +1,5 @@
 const path = require('path');
 const fs = require('fs');
-// data.jsonへのパスは、__dirnameがapiディレクトリを指すため、変更なし
 const dataPath = path.join(__dirname, 'data.json'); 
 let knowledgeBase = {};
 try {
@@ -8,7 +7,7 @@ try {
   const botData = JSON.parse(rawData);
   knowledgeBase = botData.knowledgeBase || {};
 } catch (error) {
-  console.error('data.json の読み込みに失敗しました:', error && error.message ? error.message : error);
+  
 }
 
 let fetchImpl = (typeof globalThis !== 'undefined' && globalThis.fetch) ? globalThis.fetch : null;
@@ -21,7 +20,6 @@ if (!fetchImpl) {
       const undici = require('undici');
       fetchImpl = undici.fetch;
     } catch (e2) {
-      console.warn('fetchは利用できません: node-fetchまたはundiciをインストールしない限り、ネットワーク呼び出しは失敗します。');
       fetchImpl = null;
     }
   }
@@ -42,16 +40,14 @@ const initTokenizer = (async () => {
       const builderArgs = dictPath ? { dicPath: dictPath } : {};
       kuromoji.builder(builderArgs).build((err, built) => {
         if (err) {
-          console.warn('kuromoji build failed:', err && err.message ? err.message : err);
           return resolve();
         }
         tokenizer = built;
-        console.log('Kuromoji準備完了 (dictPath=', dictPath, ')');
         resolve();
       });
     });
   } catch (err) {
-    console.error('initTokenizer エラー:', err && err.message ? err.message : err);
+    
   }
 })();
 
@@ -65,6 +61,17 @@ function pushHistory(ctx, role, text) {
   ctx.updatedAt = nowTs();
 }
 function choose(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function checkTemporalKeywords(text) {
+  if (!text) return { isFuture: false, isCurrent: false };
+  if (/(明日|あさって|来週|来月|将来|週間|予報|翌日|以降)/.test(text)) {
+    return { isFuture: true, isCurrent: false };
+  }
+  if (/(現在|今|いま|なう|今日の)/.test(text)) {
+    return { isFuture: false, isCurrent: true };
+  }
+  return { isFuture: false, isCurrent: true };
+}
 
 function getCompoundKeywordsFromTokens(tokens) {
   const keywords = [];
@@ -121,13 +128,18 @@ function resolveIntentAndEntities(text, tokens, ctx) {
 
   const weatherKeywords = ['天気', '天候', '気温', '雨', '週間', '予報'];
   if (weatherKeywords.some(k => text.includes(k))) {
-    result.intent = 'weather';
+    const temporal = checkTemporalKeywords(text);
+    if (temporal.isFuture) {
+        result.intent = 'weather_future';
+    } else {
+        result.intent = 'weather';
+    }
   }
 
   result.isQuestion = (/[?？]/.test(text) || /何|誰|いつ|どこ|どう|知りたい|教えて/.test(text));
 
   const extractedKeywords = getCompoundKeywordsFromTokens(tokens);
-
+  
   for (const t of tokens) {
     if (t.pos === '名詞' && (t.pos_detail_1 === '固有名詞' || t.pos_detail_1 === '地域' || t.pos_detail_1 === '国' || t.surface_form.endsWith('市') || t.surface_form.endsWith('府') || t.surface_form.endsWith('県') || t.surface_form.endsWith('町') || t.surface_form.endsWith('村'))) {
       result.placeEntity = t.surface_form;
@@ -135,12 +147,14 @@ function resolveIntentAndEntities(text, tokens, ctx) {
     }
   }
 
-  if (extractedKeywords.length > 0) {
+  const filteredKeywords = extractedKeywords.filter(k => k.length > 1 && !['あなた', 'それ', 'これ'].includes(k));
+
+  if (filteredKeywords.length > 0) {
     if (result.placeEntity) {
-      const nonPlaceKeywords = extractedKeywords.filter(k => k !== result.placeEntity && !weatherKeywords.includes(k));
+      const nonPlaceKeywords = filteredKeywords.filter(k => k !== result.placeEntity && !weatherKeywords.includes(k));
       result.mainKeyword = nonPlaceKeywords.length > 0 ? nonPlaceKeywords[0] : null;
     } else {
-      result.mainKeyword = extractedKeywords[0];
+      result.mainKeyword = filteredKeywords[0];
     }
   }
 
@@ -170,7 +184,7 @@ async function tryWikipedia(keyword) {
       }
     }
   } catch (err) {
-    console.warn('tryWikipedia error', err && err.message ? err.message : err);
+    
   }
   return null;
 }
@@ -187,7 +201,7 @@ async function tryDuckDuckGo(q) {
       return { source: 'duckduckgo', title: j.Heading || q, text: txt };
     }
   } catch (err) {
-    console.warn('tryDuckDuckGo error', err && err.message ? err.message : err);
+    
   }
   return null;
 }
@@ -219,7 +233,7 @@ async function getAdvice() {
     const j = await res.json();
     if (j && j.slip && j.slip.advice) return { source: 'advice', text: j.slip.advice };
   } catch (e) {
-    console.warn('getAdvice error', e && e.message ? e.message : e);
+    
   }
   return null;
 }
@@ -243,7 +257,7 @@ async function getWeatherForPlace(place) {
       return { source: 'open-meteo', text, meta: { latitude: lat, longitude: lon } };
     }
   } catch (e) {
-    console.warn('getWeatherForPlace error', e && e.message ? e.message : e);
+    
   }
   return null;
 }
@@ -273,7 +287,6 @@ async function getBotResponse(userId, userMessage, opts = {}) {
     }
   }
   if (isNewTopic) {
-    console.log('New topic detected. Resetting context for userId=', userId);
     ctx = { history: [], persona: opts.persona || 'neutral', lastKeyword: null, lastEntities: [], updatedAt: now };
   }
 
@@ -308,7 +321,7 @@ async function getBotResponse(userId, userMessage, opts = {}) {
     return { text: r, meta: { mode: 'thanks' } };
   }
 
-  if (intent === 'weather') {
+  if (intent === 'weather' || intent === 'weather_future') {
     let placeToSearch = explicitPlace || null;
 
     if (!placeToSearch) {
@@ -319,6 +332,13 @@ async function getBotResponse(userId, userMessage, opts = {}) {
         }
       }
     }
+    
+    if (intent === 'weather_future') {
+        const r = `「明日」「週間」などの未来の天気について検索するには、より高度なAPIが必要です。現在は「${placeToSearch || '現在の場所'}」の現在の天気のみ対応しています。`;
+        pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
+        return { text: r, meta: { mode: 'future_weather_limitation' } };
+    }
+
 
     if (placeToSearch) {
       const w = await getWeatherForPlace(placeToSearch);
@@ -346,7 +366,16 @@ async function getBotResponse(userId, userMessage, opts = {}) {
     const a = await getAdvice();
     if (a) { pushHistory(ctx, 'bot', a.text); contextMap.set(userId, ctx); return { text: a.text, meta: { source: a.source } }; }
   }
+  
+  // 1. 質問全体をDuckDuckGoに投げてみる (複合的な質問に対応)
+  const ddgWholeQuery = await tryDuckDuckGo(userMessage);
+  if (ddgWholeQuery) {
+      const r = `${ddgWholeQuery.title} — ${ddgWholeQuery.text}`;
+      pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
+      return { text: r, meta: { source: ddgWholeQuery.source, whole_query: true } };
+  }
 
+  // 2. 次に、個別のキーワードを使ってWikipedia/DuckDuckGo検索を試みる
   for (const cand of candidates) {
     if (!cand || String(cand).trim().length === 0) continue;
     const wiki = await tryWikipedia(cand);
@@ -370,12 +399,6 @@ async function getBotResponse(userId, userMessage, opts = {}) {
   }
 
   if (intent === 'question' || /知りたい|教えて|どうやって/.test(userMessage)) {
-    const ddgWhole = await tryDuckDuckGo(userMessage);
-    if (ddgWhole) {
-      const r = `${ddgWhole.title} — ${ddgWhole.text}`;
-      pushHistory(ctx, 'bot', r); contextMap.set(userId, ctx);
-      return { text: r, meta: { source: ddgWhole.source } };
-    }
     const fallbackQ = choose(['もう少し詳しく言ってくれますか？','それはどういう意味ですか？','要点は何でしょうか？']);
     pushHistory(ctx, 'bot', fallbackQ); contextMap.set(userId, ctx);
     return { text: fallbackQ, meta: { mode: 'clarify' } };
@@ -430,7 +453,6 @@ module.exports = async (req, res) => {
     if (!userId) userId = 'anon';
 
     if (isEchoMessage(userId, message)) {
-      console.log('Echo message ignored for userId=', userId);
       return res.status(200).json({ reply: '', text: '', ignore: true, reason: 'echo' });
     }
 
@@ -467,7 +489,6 @@ module.exports = async (req, res) => {
     return res.status(200).json(responseBody);
 
   } catch (err) {
-    console.error('handler error', err && err.stack ? err.stack : err);
     return res.status(500).json({ reply: '', text: '', error: 'internal server error', detail: err && err.message ? err.message : String(err) });
   }
 };
