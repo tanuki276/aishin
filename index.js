@@ -1,86 +1,44 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const chatWindow = document.getElementById('chat-window');
-    const userInput = document.getElementById('user-input');
-    const sendButton = document.getElementById('send-button');
+// /index.js (Vercel Node.js Serverless 対応版)
 
-    // 修正: APIエンドポイントを /api/chat に変更
-    const API_ENDPOINT = '/api/chat';
+const express = require('express');
+const path = require('path');
+const app = express();
+// VercelではPORTは自動設定される
+const port = process.env.PORT || 3000; 
 
-    /**
-     * メッセージをチャットウィンドウに追加する関数
-     * @param {string} text - 表示するテキスト
-     * @param {string} role - 'user' または 'bot'
-     */
-    function appendMessage(text, role) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${role}-message`;
-        messageDiv.textContent = text;
-        chatWindow.appendChild(messageDiv);
-        chatWindow.scrollTop = chatWindow.scrollHeight; // スクロールを最下部に移動
-    }
+// 必須
+app.use(express.json()); 
 
-    /**
-     * APIにメッセージを送信し、応答を取得する
-     * @param {string} message - ユーザーが入力したメッセージ
-     */
-    async function sendMessage(message) {
-        if (!message.trim()) return;
-
-        // ユーザーメッセージを表示
-        appendMessage(message, 'user');
-        userInput.value = ''; // 入力フィールドをクリア
-
-        // 送信ボタンを無効化
-        sendButton.disabled = true;
-        userInput.disabled = true;
-        userInput.placeholder = '応答待機中...';
-
-        try {
-            const userId = 'anon_user'; // 簡易的なユーザーID
-
-            const response = await fetch(API_ENDPOINT, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    userId: userId,
-                    message: message
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error(`APIエラー: ${response.status} ${response.statusText}`);
-            }
-
-            const data = await response.json();
-            const botReply = data.reply || '応答がありませんでした。';
-
-            // ボットの応答を表示
-            appendMessage(botReply, 'bot');
-
-        } catch (error) {
-            console.error('通信エラー:', error);
-            appendMessage('エラーが発生しました。しばらくしてから再度お試しください。', 'bot');
-        } finally {
-            // 送信ボタンを再有効化
-            sendButton.disabled = false;
-            userInput.disabled = false;
-            userInput.placeholder = 'メッセージを入力してください...';
-            userInput.focus();
-        }
-    }
-
-    // 送信ボタンクリック時のイベントリスナー
-    sendButton.addEventListener('click', () => {
-        sendMessage(userInput.value);
-    });
-
-    // Enterキー押下時のイベントリスナー
-    userInput.addEventListener('keypress', (event) => {
-        if (event.key === 'Enter') {
-            event.preventDefault(); // デフォルトの改行を防ぐ
-            sendMessage(userInput.value);
+// 1. ルートパス (/) のハンドラ: index.htmlを返す
+app.get('/', (req, res) => {
+    // __dirname は Vercel 環境ではルートディレクトリを指すことが多い
+    const htmlPath = path.join(__dirname, 'index.html');
+    res.sendFile(htmlPath, (err) => {
+        if (err) {
+            console.error('Error sending index.html:', err);
+            res.status(500).send('Server Error: index.htmlが見つかりません。');
         }
     });
 });
+
+// 2. APIエンドポイントの定義 (/api/chat)
+app.post('/api/chat', (req, res) => {
+    const { userId, message } = req.body; 
+
+    if (!message) {
+        return res.status(400).json({ error: "メッセージがありません。" });
+    }
+    
+    const botResponse = `【Vercel応答成功】ユーザーID ${userId} のメッセージを受信しました。`; 
+    
+    // 💡 クライアントが期待する 'reply' キーで応答を返す
+    res.json({ reply: botResponse });
+});
+
+// 3. Vercel では、この listen はほとんど無視されますが、ローカル実行のために必要です。
+app.listen(port, () => {
+    console.log(`Server running successfully at http://localhost:${port}`);
+});
+
+// 💡 Vercel のサーバーレス関数としてエクスポート (Vercel が Express を検出するために必要)
+module.exports = app; 
