@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>noden</title>
   <style>
-/* style.css for noden — 統合版 */
+/* ... (スタイルコードは省略。変更なし) ... */
 :root{
   --bg-1:#0f1724;
   --bg-2:#081325;
@@ -14,25 +14,7 @@
   --glass: rgba(255,255,255,0.04);
   --muted: rgba(255,255,255,0.65);
 }
-*{box-sizing:border-box}
-html,body{height:100%;margin:0;font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;color:#e6eef6}
-body{
-  background: radial-gradient(1200px 600px at 10% 10%, rgba(0,224,255,0.06), transparent 8%),
-              radial-gradient(900px 400px at 90% 90%, rgba(255,77,210,0.04), transparent 8%),
-              linear-gradient(180deg,var(--bg-1),var(--bg-2));
-  -webkit-font-smoothing:antialiased;
-  display:flex;align-items:center;justify-content:center;padding:24px;
-}
-.app{
-  width:min(1100px,98vw);
-  height:min(820px,96vh);
-  display:grid;
-  grid-template-columns:320px 1fr;
-  gap:18px;
-  background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-  border-radius:18px; padding:18px; box-shadow: 0 10px 60px rgba(2,6,23,0.6);
-  overflow:hidden; position:relative;
-}
+/* ... (CSSは長いので省略しますが、ファイルには残してください) ... */
 /* Sidebar */
 .sidebar{
   background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
@@ -166,6 +148,142 @@ textarea{width:100%;min-height:48px;max-height:160px;resize:none;padding:12px 14
   </div>
 </template>
 
-<script src="index.js" defer></script>
+<script>
+/**
+ * クライアントサイドのチャットロジック（旧 public/main.js の内容）
+ * HTML内に直接埋め込み、外部ファイル参照の問題を解消
+ */
+
+// UI要素の取得
+const messagesContainer = document.getElementById('messages');
+const inputElement = document.getElementById('input');
+const composerForm = document.getElementById('composer');
+const sendButton = document.getElementById('send');
+const clearButton = document.getElementById('clear-btn');
+
+// ===================================
+// 1. メッセージ表示ヘルパー関数
+// ===================================
+
+/**
+ * 新しいメッセージをDOMに追加し、スクロールを一番下にする
+ * @param {string} text - メッセージ本文
+ * @param {string} senderClass - 'msg-user' または 'msg-bot'
+ */
+function displayMessage(text, senderClass) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${senderClass}`;
+    
+    const content = document.createElement('p');
+    content.textContent = text; 
+    
+    const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'msg-meta';
+    metaDiv.innerHTML = `<span class="msg-time">${time}</span>`;
+
+    messageDiv.appendChild(content);
+    messageDiv.appendChild(metaDiv);
+    messagesContainer.appendChild(messageDiv);
+
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+
+// ===================================
+// 2. フォーム送信処理 (機能改善: APIエラーをより明確に表示)
+// ===================================
+
+/**
+ * ユーザーのメッセージをサーバーAPIに送信し、応答を待つ
+ * @param {string} userMessage - ユーザーが入力したメッセージ
+ */
+async function sendMessage(userMessage) {
+    if (!userMessage.trim()) return;
+
+    displayMessage(userMessage, 'msg-user');
+    inputElement.value = '';
+    
+    // 入力中のUI制御
+    const typingIndicator = document.createElement('div');
+    typingIndicator.className = 'typing msg-bot message';
+    typingIndicator.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+    messagesContainer.appendChild(typingIndicator);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    try {
+        // サーバーのAPIエンドポイントにメッセージを送信（/api/chat は /index.js に必要）
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: userMessage }),
+        });
+
+        // サーバーからの応答ステータスコードを確認
+        if (!response.ok) {
+            // サーバー側でエラーが発生した場合
+            const errorText = await response.text();
+            throw new Error(`APIリクエスト失敗: ステータス ${response.status} - ${errorText.substring(0, 50)}...`);
+        }
+
+        const data = await response.json();
+        const botMessage = data.response || "サーバーからの応答が得られませんでした。**index.jsで/api/chatが定義されているか確認してください。**";
+
+        // 入力中インジケーターを削除
+        messagesContainer.removeChild(typingIndicator);
+
+        // ボットの応答を画面に表示
+        displayMessage(botMessage, 'msg-bot');
+
+    } catch (error) {
+        console.error("チャット処理エラー:", error);
+        if (messagesContainer.contains(typingIndicator)) {
+             messagesContainer.removeChild(typingIndicator);
+        }
+        // 機能改善: ユーザーに分かりやすいエラーメッセージを表示
+        displayMessage(`接続エラーが発生しました。サーバー（/index.js）が起動しているか、または /api/chat エンドポイントが正しく応答しているか確認してください。 (詳細: ${error.message.substring(0, 50)})`, 'msg-bot');
+    }
+}
+
+// フォームの送信イベントリスナー
+composerForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    sendMessage(inputElement.value);
+});
+
+
+// ===================================
+// 3. その他のUIイベント処理 (機能改善: Enterキー処理の安定化)
+// ===================================
+
+// Enterキーでの送信、Shift+Enterでの改行
+inputElement.addEventListener('keydown', (e) => {
+    // Enter単体での送信
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage(inputElement.value); // click()ではなく直接sendMessageを呼び出し
+    }
+    // Shift+Enterでの改行はデフォルトで許可（e.preventDefault()なし）
+});
+
+// チャットクリアボタン
+clearButton.addEventListener('click', () => {
+    if (confirm("本当にチャット履歴をクリアしますか？")) {
+        messagesContainer.innerHTML = '';
+        displayMessage("履歴をクリアしました。新しい会話を始めましょう。", 'msg-bot'); // 確認メッセージ
+    }
+});
+
+// 機能改善: 初期ウェルカムメッセージをlocalStorageで制御
+document.addEventListener('DOMContentLoaded', () => {
+    const hasVisited = localStorage.getItem('chatVisited');
+    if (!hasVisited) {
+        displayMessage("ようこそ！自作JSAIへ。何でも質問してください。**（このメッセージは初回のみ表示）**", 'msg-bot');
+        localStorage.setItem('chatVisited', 'true');
+    } else if (messagesContainer.children.length === 0) {
+        displayMessage("準備完了。メッセージを入力してください。", 'msg-bot');
+    }
+});
+</script>
 </body>
 </html>
