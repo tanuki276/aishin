@@ -1,14 +1,16 @@
-<!DOCTYPE html><html lang="ja">
+<!DOCTYPE html>
+<html lang="ja">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>神チャット UI — Pro</title>
-<style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>noden</title>
+  <style>
+/* style.css for noden — 統合版 */
 :root{
-  --bg-1:#0f1724; /* deep */
-  --bg-2:#081325; /* darker */
-  --accent-1:#00e0ff; /* cyan */
-  --accent-2:#ff4dd2; /* magenta */
+  --bg-1:#0f1724;
+  --bg-2:#081325;
+  --accent-1:#00e0ff;
+  --accent-2:#ff4dd2;
   --glass: rgba(255,255,255,0.04);
   --muted: rgba(255,255,255,0.65);
 }
@@ -96,62 +98,65 @@ textarea{width:100%;min-height:48px;max-height:160px;resize:none;padding:12px 14
 .hint{font-size:13px;color:rgba(230,238,246,0.55)}
 /* mobile tweaks */
 @media(max-width:880px){.app{grid-template-columns:1fr;height:92vh}.sidebar{display:none}}
-</style>
+  </style>
 </head>
 <body>
 <div class="app" role="application">
   <aside class="sidebar" aria-label="会話一覧">
     <div class="brand">
-      <div class="logo">jsai</div>
+      <div class="logo">神</div>
       <div>
-        <h1>ノード</h1>
-        <div class="small">自作JSAI</div>
+        <h1>神チャット Pro</h1>
+        <div class="small">速い・派手・永続</div>
       </div>
-    </div><div class="search">
-  <div class="input" title="検索">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="opacity:.9"><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="1.6"/></svg>
-    <input id="conv-search" placeholder="検索 or 新規作成" aria-label="会話検索">
-  </div>
-</div>
+    </div>
+    <div class="search">
+      <div class="input" title="検索">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="opacity:.9"><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="1.6"/></svg>
+        <input id="conv-search" placeholder="検索 or 新規作成" aria-label="会話検索">
+      </div>
+    </div>
 
-<div class="conversations" id="conversations" role="list">
-  <!-- JS will populate conversations -->
-</div>
+    <div class="conversations" id="conversations" role="list"></div>
 
-<div class="status">
-  <div class="toggle" id="sound-toggle" title="送信音オン/オフ">🔊 <span class="small">音</span></div>
-  <div class="toggle" id="theme-toggle" title="テーマ切替">🌗 <span class="small">テーマ</span></div>
-  <div class="hint" style="margin-left:auto">保存: localStorage</div>
-</div>
+    <div class="status">
+      <div class="toggle" id="sound-toggle" title="送信音オン/オフ">🔊 <span class="small">音</span></div>
+      <div class="toggle" id="theme-toggle" title="テーマ切替">🌗 <span class="small">テーマ</span></div>
+      <div class="hint" style="margin-left:auto">保存: localStorage</div>
+    </div>
 
-  </aside>  <main class="chat-panel" aria-live="polite">
+  </aside>
+
+  <main class="chat-panel" aria-live="polite">
     <div class="header">
       <div class="h-left">
-        <div class="h-title">ノード</div>
-        <div class="small">自作JSAI</div>
+        <div class="h-title">神との会話</div>
+        <div class="small">速攻で返す。盛るか削るかはお前次第。</div>
       </div>
       <div class="h-actions">
         <button class="icon-btn" id="clear-btn" title="チャットをクリア">🗑</button>
         <button class="icon-btn" id="export-btn" title="ログをエクスポート">⬇️</button>
       </div>
-    </div><section class="messages" id="messages" aria-label="メッセージ一覧">
-  <!-- messages injected by JS -->
-</section>
-
-<form class="composer" id="composer" onsubmit="return false;">
-  <div class="textarea">
-    <textarea id="input" placeholder="Shift+Enterで改行 — Enterで送信" aria-label="メッセージ入力"></textarea>
-    <div style="position:absolute;right:12px;bottom:10px;display:flex;gap:8px;align-items:center">
-      <button type="button" id="emoji-btn" class="icon-btn" title="絵文字">😊</button>
     </div>
-  </div>
-  <div class="row-actions">
-    <button class="send-btn" id="send" title="送信">➤</button>
-  </div>
-</form>
+
+    <section class="messages" id="messages" aria-label="メッセージ一覧"></section>
+
+    <form class="composer" id="composer" onsubmit="return false;">
+      <div class="textarea">
+        <textarea id="input" placeholder="Shift+Enterで改行 — Enterで送信" aria-label="メッセージ入力"></textarea>
+        <div style="position:absolute;right:12px;bottom:10px;display:flex;gap:8px;align-items:center">
+          <button type="button" id="emoji-btn" class="icon-btn" title="絵文字">😊</button>
+        </div>
+      </div>
+      <div class="row-actions">
+        <button class="send-btn" id="send" title="送信" type="submit">➤</button>
+      </div>
+    </form>
 
   </main>
-</div><!-- reaction palette template --><template id="reaction-template">
+</div>
+
+<template id="reaction-template">
   <div class="reaction-palette">
     <div class="reaction">👍</div>
     <div class="reaction">❤️</div>
@@ -159,134 +164,8 @@ textarea{width:100%;min-height:48px;max-height:160px;resize:none;padding:12px 14
     <div class="reaction">😮</div>
     <div class="reaction">😂</div>
   </div>
-</template><script>
-// --- Helpers ---
-const $ = (s, root=document) => root.querySelector(s);
-const $$ = (s, root=document) => Array.from(root.querySelectorAll(s));
-const nowTime = ()=> new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+</template>
 
-// --- Persistence ---
-const STORAGE_KEY = 'kami_chat_pro_v1';
-let state = {conversations:[], active: null};
-function load(){ try{ const raw = localStorage.getItem(STORAGE_KEY); if(raw) state = JSON.parse(raw); }catch(e){} }
-function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-
-// --- Initial convs ---
-function ensureExample(){ if(state.conversations.length===0){ const id = uid(); state.conversations.push({id,title:'はじめの会話',messages:[{id:uid(),role:'bot',text:'で、何をする気だ？',time:nowTime()}]}); state.active = id; save(); }}
-
-// --- UID ---
-function uid(){ return Math.random().toString(36).slice(2,9); }
-
-// --- Render conversations list ---
-const convContainer = $('#conversations');
-function renderConversations(filter=''){
-  convContainer.innerHTML='';
-  state.conversations.filter(c=> c.title.toLowerCase().includes(filter.toLowerCase()) || (c.messages && c.messages.some(m=>m.text.toLowerCase().includes(filter.toLowerCase())))).forEach(c=>{
-    const el = document.createElement('div'); el.className='conv'; el.setAttribute('role','listitem');
-    el.innerHTML = `<div class="avatar">${c.title.slice(0,2)}</div><div class="meta"><div class="title">${c.title}</div><div class="sub">${c.messages?.slice(-1)[0]?.text?.slice(0,36) ?? ''}</div></div>`;
-    el.addEventListener('click', ()=>{ state.active = c.id; save(); render(); });
-    convContainer.appendChild(el);
-  });
-}
-
-// --- Render messages ---
-const messagesEl = $('#messages');
-function renderMessages(){ messagesEl.innerHTML=''; if(!state.active) return;
-  const conv = state.conversations.find(c=>c.id===state.active);
-  if(!conv) return;
-  conv.messages.forEach(m=>{
-    const el = document.createElement('div'); el.className='message '+(m.role==='user'?'msg-user':'msg-bot');
-    el.dataset.id = m.id;
-    el.innerHTML = `<div class="content">${escapeHtml(m.text)}</div><div class="msg-meta"><div class="msg-time">${m.time}</div></div>`;
-
-    // reaction on longpress / click
-    el.addEventListener('contextmenu', (e)=>{ e.preventDefault(); openReactions(el); });
-    messagesEl.appendChild(el);
-  });
-  // auto scroll to bottom
-  requestAnimationFrame(()=> messagesEl.scrollTop = messagesEl.scrollHeight);
-}
-
-// --- Escape ---
-function escapeHtml(s){ return s.replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[c]); }
-
-// --- Composer ---
-const input = $('#input'); const sendBtn = $('#send'); const emojiBtn = $('#emoji-btn');
-input.addEventListener('keydown', (e)=>{
-  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); handleSend(); }
-});
-sendBtn.addEventListener('click', handleSend);
-
-function handleSend(){ const text = input.value.trim(); if(!text) return; sendUserMessage(text); input.value=''; input.focus(); }
-
-function sendUserMessage(text){ const conv = state.conversations.find(c=>c.id===state.active); if(!conv) return; const m={id:uid(),role:'user',text, time:nowTime()}; conv.messages.push(m); save(); render(); playSend(); // bot reply simulated streaming
-  simulateBotReply(conv, text);
-}
-
-// --- Simulate streaming bot reply (タイプライター) ---
-let typingTimer=null;
-function simulateBotReply(conv, userText){ // create a placeholder
-  const replyId = uid(); const placeholder = {id:replyId, role:'bot', text:'', time:nowTime(), streaming:true}; conv.messages.push(placeholder); save(); render();
-  const response = craftResponse(userText);
-  let i=0; function tick(){ if(i>=response.length){ placeholder.streaming=false; placeholder.time=nowTime(); save(); render(); return; }
-    placeholder.text += response[i++]; if(i%3===0) placeholder.time=nowTime(); save(); render(); typingTimer = setTimeout(tick, 30 + Math.random()*40);
-  }
-  setTimeout(tick, 350 + Math.random()*120);
-}
-
-function craftResponse(user){ // quick 'AI' flavor — punchy and concise
-  const base = [
-    `了解。${user} — いいね、やるぞ。`,
-    `それ、要点を3つでまとめると: 1) 準備 2) 実行 3) 検証。`,
-  ];
-  return base[Math.floor(Math.random()*base.length)];
-}
-
-// --- Rendering controller ---
-function render(){ renderConversations($('#conv-search').value); renderMessages(); }
-
-// --- Reactions ---
-function openReactions(target){ closePalette(); const tpl = $('#reaction-template'); const clone = tpl.content.firstElementChild.cloneNode(true);
-  document.body.appendChild(clone);
-  const rect = target.getBoundingClientRect(); clone.style.top = (rect.top - 50)+'px'; clone.style.left = (rect.left)+'px';
-  clone.addEventListener('click', (e)=>{ if(e.target.classList.contains('reaction')){ attachReaction(target.dataset.id, e.target.textContent); closePalette(); }});
-  clone.dataset.attachedTo = target.dataset.id;
-}
-function closePalette(){ $$('.reaction-palette').forEach(el=>el.remove()); }
-function attachReaction(msgId, r){ const conv = state.conversations.find(c=>c.id===state.active); const m = conv.messages.find(x=>x.id===msgId); m.reaction = r; save(); render(); }
-
-// --- Sound ---
-let soundOn = true; const soundToggle = $('#sound-toggle'); soundToggle.addEventListener('click', ()=>{ soundOn=!soundOn; soundToggle.style.opacity = soundOn?1:0.5; });
-function playSend(){ if(!soundOn) return; try{ const ctx = new (window.AudioContext || window.webkitAudioContext)(); const o = ctx.createOscillator(); const g = ctx.createGain(); o.type='sine'; o.frequency.value=880; g.gain.value=0.0001; o.connect(g); g.connect(ctx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime+0.01); g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+0.12); o.stop(ctx.currentTime+0.15);}catch(e){}
-}
-
-// --- Export / Clear ---
-$('#clear-btn').addEventListener('click', ()=>{
-  if(!confirm('全チャットを消しますか？')) return; state.conversations=[]; state.active=null; ensureExample(); save(); render();
-});
-$('#export-btn').addEventListener('click', ()=>{
-  const data = JSON.stringify(state, null, 2); const blob = new Blob([data], {type:'application/json'}); const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download = 'kami_chat_export_'+new Date().toISOString()+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-});
-
-// --- Emoji picker (minimal) ---
-emojiBtn.addEventListener('click', ()=>{
-  const list = ['😄','🔥','👍','🤔','💡','🎯','🚀','🙏']; const p = document.createElement('div'); p.style.position='absolute'; p.style.bottom='90px'; p.style.right='28px'; p.style.padding='8px'; p.style.display='flex'; p.style.gap='8px'; p.style.background='rgba(0,0,0,0.5)'; p.style.borderRadius='12px'; p.style.zIndex=9999; list.forEach(e=>{ const b=document.createElement('button'); b.className='icon-btn'; b.textContent=e; b.style.width='44px'; b.style.height='44px'; b.style.borderRadius='8px'; b.addEventListener('click', ()=>{ input.value += e; input.focus(); p.remove(); }); p.appendChild(b); }); document.body.appendChild(p); setTimeout(()=>{ document.addEventListener('click', function h(ev){ if(!p.contains(ev.target) && ev.target!==emojiBtn){ p.remove(); document.removeEventListener('click',h);} }); },50);
-});
-
-// --- Search & create conv ---
-$('#conv-search').addEventListener('input', (e)=> renderConversations(e.target.value));
-$('#conv-search').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ const title = e.target.value.trim()||'新しい会話'; const id=uid(); state.conversations.unshift({id,title,messages:[]}); state.active=id; e.target.value=''; save(); render(); }});
-
-// --- Theme toggle (simple) ---
-$('#theme-toggle').addEventListener('click', ()=>{
-  document.body.classList.toggle('alt-theme'); const t=document.body.classList.contains('alt-theme'); if(t){ document.documentElement.style.setProperty('--accent-1','#7c5cff'); document.documentElement.style.setProperty('--accent-2','#00ffd1'); }else{ document.documentElement.style.setProperty('--accent-1','#00e0ff'); document.documentElement.style.setProperty('--accent-2','#ff4dd2'); }
-});
-
-// --- Boot ---
-load(); ensureExample(); render();
-
-// expose for debugging
-window.kami_state = state; window.kami_save = save;
-</script></body>
+<script src="public/main.js" defer></script>
+</body>
 </html>
