@@ -367,7 +367,8 @@ async function getBotResponse(userId, userMessage, opts = {}) {
     if (a) { pushHistory(ctx, 'bot', a.text); contextMap.set(userId, ctx); return { text: a.text, meta: { source: a.source } }; }
   }
   
-  // 1. 質問全体をDuckDuckGoに投げてみる (複合的な質問に対応)
+  // 1. 質問全体をDuckDuckGoに投げてみる (複合的な質問への対応を最優先)
+  // このブロックが追加・優先されています。
   const ddgWholeQuery = await tryDuckDuckGo(userMessage);
   if (ddgWholeQuery) {
       const r = `${ddgWholeQuery.title} — ${ddgWholeQuery.text}`;
