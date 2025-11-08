@@ -1,71 +1,29 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>旧日本語変換</title>
-  <style>
-    :root{--bg:#0f1724;--card:#0b1220;--muted:#9aa4b2;--accent:#f59e0b}
-    body{font-family: "Noto Sans JP", system-ui, -apple-system, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif; background:linear-gradient(180deg,#071021 0%, #071827 100%); color:#e6eef6; margin:0; padding:18px}
-    h1{font-size:20px;margin:0 0 8px}
-    .wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:14px;border-radius:10px;box-shadow:0 6px 20px rgba(2,6,23,0.6)}
-    textarea{width:100%;height:320px;background:transparent;border:1px solid rgba(255,255,255,0.06);color:inherit;padding:10px;border-radius:6px;font-size:15px;resize:vertical}
-    .controls{display:flex;gap:8px;align-items:center;margin-top:10px}
-    button{background:var(--accent);border:none;color:#071021;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:700}
-    .muted{color:var(--muted);font-size:13px}
-    .small{font-size:13px}
-    .dict-list{max-height:220px;overflow:auto;border:1px dashed rgba(255,255,255,0.04);padding:8px;border-radius:6px;background:rgba(255,255,255,0.01)}
-    .pair{display:flex;gap:8px;margin-bottom:6px;align-items:center}
-    .pair input[type=text]{flex:1;background:transparent;border:1px solid rgba(255,255,255,0.04);padding:6px;border-radius:6px;color:inherit}
-    .icon-btn{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted);padding:6px;border-radius:6px;cursor:pointer}
-    .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-    .options{display:flex;gap:8px;align-items:center}
-    .notice{font-size:13px;color:#ffdca9;background:linear-gradient(90deg,rgba(255,255,255,0.02),transparent);padding:8px;border-radius:6px;margin-top:10px}
-    .footer{margin-top:12px;color:var(--muted);font-size:13px}
-    @media (max-width: 768px) {
-        .wrap { grid-template-columns: 1fr; }
-    }
-  </style>
-  <script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ソ連</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; margin: 0; background-color: #f4f7f6; }
+        #chat-window { flex-grow: 1; padding: 20px; overflow-y: auto; background-color: #fff; border-bottom: 1px solid #ddd; }
+        .message { margin-bottom: 10px; padding: 8px 12px; border-radius: 15px; max-width: 70%; }
+        .user-message { background-color: #dcf8c6; margin-left: auto; text-align: right; }
+        .bot-message { background-color: #f0f0f0; margin-right: auto; text-align: left; }
+        #input-area { display: flex; padding: 10px; background-color: #eee; }
+        #user-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; margin-right: 10px; }
+        #send-button { padding: 10px 15px; border: none; border-radius: 20px; background-color: #007bff; color: white; cursor: pointer; }
+        #send-button:disabled { background-color: #ccc; cursor: not-allowed; }
+    </style>
 </head>
 <body>
-  <div class="topbar">
-    <div>
-      <h1>旧日本語変換</h1>
-      <div class="muted">形態素解析とローカル辞書で“本気”変換</div>
+    <div id="chat-window">
+        <div class="message bot-message">ようこそ。何でも聞いてください。</div>
     </div>
-    <div class="options">
-      <span class="small muted">自動変換:</span>
-      <label><input type="checkbox" id="opt-kanji" checked> 旧字体</label>
-      <label><input type="checkbox" id="opt-kana" checked> 旧仮名遣</label>
-      <label><input type="checkbox" id="opt-grammar" checked> 文体変換</label>
+    <div id="input-area">
+        <input type="text" id="user-input" placeholder="メッセージを入力してください..." autofocus>
+        <button id="send-button">送信</button>
     </div>
-  </div>
-  <div class="wrap">
-    <div class="card">
-      <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <strong>入力（現代文）</strong>
-        <div class="muted">テキストを入れて変換ボタンを押す</div>
-      </div>
-      <textarea id="input" placeholder="ここに現代日本語を入力"></textarea>
-      <div class="controls">
-        <button id="convert" disabled>変換 ▶</button>
-        <button id="swap" class="icon-btn">入替</button>
-        <button id="clear" class="icon-btn">クリア</button>
-        <button id="load-sample" class="icon-btn">サンプル読込</button>
-        <div style="flex:1"></div>
-      </div>
-      <div class="notice" id="status-message">準備中...</div>
-    </div>
-    <div class="card">
-      <strong>出力（旧日本語）</strong>
-      <textarea id="output" readonly placeholder="変換結果がここに表示されます"></textarea>
-      <div class="notice" style="margin-top:12px;">
-        ※ 辞書は`./data/`フォルダから、形態素解析辞書は`/dict/`フォルダから自動で読み込まれます。
-      </div>
-    </div>
-  </div>
-  <script src="./main.js"></script>
+    <script src="index.js"></script>
 </body>
 </html>
