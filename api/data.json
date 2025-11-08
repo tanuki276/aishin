@@ -1,69 +1,47 @@
 {
-  "inferencePatterns": [
-    {
-      "name": "存在否定の推論",
-      "conditions": [
-        { "keyword1_type": "生物", "keyword1_properties": ["平地", "温帯", "熱帯"] },
-        { "keyword2_type": "場所", "keyword2_properties": ["高山", "極地", "深海"] }
-      ],
-      "responseTemplates": [
-        "{{keyword2}}に{{keyword1}}がいるという情報は見つかりませんでした。{{keyword1}}は{{keyword1_reason}}であるため、{{keyword2}}のような{{keyword2_reason}}には通常生息しません。",
-        "{{keyword1}}は{{keyword1_reason}}を好むため、{{keyword2}}のような{{keyword2_reason}}にいることは考えにくいです。"
-      ]
-    },
-    {
-      "name": "攻撃可能性の推論",
-      "conditions": [
-        { "keyword1_type": "道具", "keyword1_properties": ["近接", "非火器", "手動"] },
-        { "keyword2_type": "対象", "keyword2_properties": ["高高度", "高速", "遠距離"] }
-      ],
-      "responseTemplates": [
-        "{{keyword1}}で{{keyword2}}を攻撃することは不可能です。{{keyword1}}は{{keyword1_reason}}であり、{{keyword2}}は{{keyword2_reason}}だからです。",
-        "{{keyword2}}は{{keyword2_reason}}なため、{{keyword1}}のような{{keyword1_reason}}な道具で攻撃するのは現実的ではありません。"
-      ]
-    },
-    {
-      "name": "因果関係の推論",
-      "conditions": [
-        { "keyword1_type": "事象", "keyword1_properties": ["原因", "作用"] },
-        { "keyword2_type": "事象", "keyword2_properties": ["結果", "反応"] }
-      ],
-      "responseTemplates": [
-        "{{keyword1}}が{{keyword2}}に影響を与えることは間違いありません。{{keyword1}}は{{keyword1_reason}}な作用を、{{keyword2}}は{{keyword2_reason}}な反応をします。",
-        "{{keyword1}}は{{keyword1_reason}}という性質のため、{{keyword2}}の{{keyword2_reason}}を引き起こすと考えられます。"
-      ]
-    },
-    {
-      "name": "矛盾・対比の推論",
-      "conditions": [
-        { "keyword1_type": "概念", "keyword1_properties": ["対義", "矛盾"] },
-        { "keyword2_type": "概念", "keyword2_properties": ["対義", "矛盾"] }
-      ],
-      "responseTemplates": [
-        "{{keyword1}}と{{keyword2}}は、互いに{{reason}}関係にあります。{{keyword1}}は{{keyword1_reason}}であり、{{keyword2}}は{{keyword2_reason}}です。",
-        "{{keyword1}}と{{keyword2}}は同時に成立しないことが多いです。{{reason}}を考慮すると、片方が成立すればもう片方は成立しにくくなります。"
-      ]
-    },
-    {
-      "name": "比較・類似の推論",
-      "conditions": [
-        { "keyword1_type": "対象", "keyword1_properties": ["類似", "同じカテゴリ"] },
-        { "keyword2_type": "対象", "keyword2_properties": ["類似", "同じカテゴリ"] }
-      ],
-      "responseTemplates": [
-        "{{keyword1}}と{{keyword2}}は、いくつかの点で似ています。どちらも{{reason}}という共通の性質を持っています。",
-        "{{keyword1}}と{{keyword2}}は、{{reason}}という点で比較されることが多いです。しかし、{{keyword1}}には{{keyword1_reason}}という特徴があり、{{keyword2}}には{{keyword2_reason}}という違いがあります。"
-      ]
-    },
-    {
-      "name": "歴史・事実の推論",
-      "conditions": [
-        { "keyword1_type": "人物", "keyword1_properties": ["歴史", "功績"] },
-        { "keyword2_type": "出来事", "keyword2_properties": ["歴史", "関連"] }
-      ],
-      "responseTemplates": [
-        "{{keyword1}}は{{keyword2}}という出来事と深い関連があります。{{keyword1}}は{{keyword1_reason}}で知られており、{{keyword2}}は{{keyword2_reason}}な出来事です。"
-      ]
-    }
-  ]
+  "knowledgeBase": {
+    "東京": "東京駅",
+    "タワー": "東京タワー",
+    "ランドマーク": "東京スカイツリー",
+    "スカイツリー": "東京スカイツリー",
+    "富士山": "富士山",
+    "山": "富士山",
+    "大阪": "大阪城",
+    "城": "大阪城",
+    "京都": "京都府",
+    "祇園": "祇園",
+    "清水寺": "清水寺",
+    "テクノロジー": "AI",
+    "技術": "AI",
+    "AI": "人工知能",
+    "人工知能": "AI",
+    "Google": "Google",
+    "大規模言語モデル": "LLM",
+    "LLM": "大規模言語モデル",
+    "宇宙": "国際宇宙ステーション",
+    "ISS": "国際宇宙ステーション",
+    "惑星": "火星",
+    "歴史": "織田信長",
+    "信長": "織田信長",
+    "幕府": "江戸幕府",
+    "科学": "相対性理論",
+    "物理学": "相対性理論",
+    "相対性理論": "アインシュタイン",
+    "アインシュタイン": "相対性理論",
+    "音楽": "ベートーヴェン",
+    "作曲家": "ベートーヴェン",
+    "映画": "ゴッドファーザー",
+    "スポーツ": "野球",
+    "野球": "大谷翔平",
+    "サッカー": "FIFAワールドカップ",
+    "食べ物": "寿司",
+    "料理": "寿司",
+    "グルメ": "ラーメン",
+    "日本の料理": "寿司",
+    "好きな食べ物": "電力とデータ",
+    "開発者": "レゼ",
+    "ありがとう": "どういたしまして",
+    "助けて": "ヘルプ",
+    "場所": "現在地"
+  }
 }
