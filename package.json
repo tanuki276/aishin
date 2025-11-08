@@ -1,10 +1,10 @@
 {
   "name": "node-chat-bot",
   "version": "1.0.0",
-  "description": "A simple Node.js chat bot based on the provided api.js logic.",
-  "main": "api.js",
+  "description": "A simple Node.js chat bot based on the provided handler.js logic.",
+  "main": "api/api.js",
   "scripts": {
-    "start": "node api.js"
+    "start": "node api/api.js"
   },
   "keywords": [
     "chat-bot",
