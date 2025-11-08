@@ -1,102 +1,133 @@
-// --- グローバル変数 ---
-let kanjiDict = {};
-let kanaDict = {};
-let grammarList = {};
-let tokenizer = null;
+/**
+ * public/main.js
+ * クライアントサイドのチャットロジック
+ */
 
-// --- DOM ---
-const $ = id => document.getElementById(id);
-const convertBtn = $('convert');
-const statusMessage = $('status-message');
+// UI要素の取得
+const messagesContainer = document.getElementById('messages');
+const inputElement = document.getElementById('input');
+const composerForm = document.getElementById('composer');
+const sendButton = document.getElementById('send');
+const clearButton = document.getElementById('clear-btn');
 
-// --- ユーザー辞書の読み込み ---
-async function loadUserDicts() {
+// ===================================
+// 1. メッセージ表示ヘルパー関数
+// ===================================
+
+/**
+ * 新しいメッセージをDOMに追加し、スクロールを一番下にする
+ * @param {string} text - メッセージ本文
+ * @param {string} senderClass - 'msg-user' または 'msg-bot'
+ */
+function displayMessage(text, senderClass) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${senderClass}`;
+    
+    const content = document.createElement('p');
+    // セキュリティのため、textContentを使用
+    content.textContent = text; 
+    
+    // 時間表示メタデータ
+    const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'msg-meta';
+    metaDiv.innerHTML = `<span class="msg-time">${time}</span>`;
+
+    messageDiv.appendChild(content);
+    messageDiv.appendChild(metaDiv);
+    messagesContainer.appendChild(messageDiv);
+
+    // スクロールを一番下へ
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+
+// ===================================
+// 2. フォーム送信処理
+// ===================================
+
+/**
+ * ユーザーのメッセージをサーバーAPIに送信し、応答を待つ
+ * @param {string} userMessage - ユーザーが入力したメッセージ
+ */
+async function sendMessage(userMessage) {
+    if (!userMessage.trim()) return; // 空のメッセージは送信しない
+
+    // 1. ユーザーメッセージを画面に表示
+    displayMessage(userMessage, 'msg-user');
+    inputElement.value = ''; // 入力欄をクリア
+
+    // 2. ボットの「入力中」インジケーターを表示 (簡易版)
+    const typingIndicator = document.createElement('div');
+    typingIndicator.className = 'typing msg-bot message';
+    typingIndicator.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+    messagesContainer.appendChild(typingIndicator);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight; // スクロール
+
     try {
-        const [kanjiRes, kanaRes, grammarRes] = await Promise.all([
-            fetch('/api/abcd?type=data&file=kanji.json').then(r => r.json()),
-            fetch('/api/abcd?type=data&file=kana.json').then(r => r.json()),
-            fetch('/api/abcd?type=data&file=grammar.json').then(r => r.json())
-        ]);
-        kanjiDict = kanjiRes;
-        kanaDict = kanaRes;
-        grammarList = grammarRes;
-        statusMessage.textContent = 'ユーザー辞書の読み込みが完了しました。';
-    } catch (e) {
-        console.error(e);
-        statusMessage.textContent = 'ユーザー辞書の読み込みに失敗しました';
+        // 3. サーバーのAPIエンドポイントにメッセージを送信
+        const response = await fetch('/api/chat', { // サーバー側の /api/chat エンドポイントを叩く
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ message: userMessage }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`APIリクエスト失敗: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const botMessage = data.response || "サーバーからの応答が得られませんでした。";
+
+        // 4. 入力中インジケーターを削除
+        messagesContainer.removeChild(typingIndicator);
+
+        // 5. ボットの応答を画面に表示
+        displayMessage(botMessage, 'msg-bot');
+
+    } catch (error) {
+        console.error("チャット処理エラー:", error);
+        // エラーメッセージを表示
+        if (messagesContainer.contains(typingIndicator)) {
+             messagesContainer.removeChild(typingIndicator);
+        }
+        displayMessage("エラーが発生しました。サーバーを確認してください。", 'msg-bot');
     }
 }
 
-// --- 形態素解析器の初期化 ---
-async function initTokenizer() {
-    statusMessage.textContent = 'Kuromoji.js辞書を初期化中...';
-    return new Promise(resolve => {
-        const baseFiles = ['base.dat.gz', 'cc.dat.gz', 'tid.dat.gz', 'tid_map.dat.gz', 'tid_pos.dat.gz', 'unk.dat.gz', 'unk_char.dat.gz', 'unk_compat.dat.gz', 'unk_invoke.dat.gz', 'unk_map.dat.gz', 'unk_pos.dat.gz'];
-        let index = 0;
+// フォームの送信イベントリスナー
+composerForm.addEventListener('submit', (e) => {
+    e.preventDefault(); // フォームのデフォルト送信（ページ遷移）を防止
+    sendMessage(inputElement.value);
+});
 
-        const fetchDic = () => {
-            if (index >= baseFiles.length) {
-                statusMessage.textContent = '準備完了です。';
-                convertBtn.disabled = false;
-                resolve();
-                return;
-            }
-            const file = baseFiles[index++];
-            const url = `/api/abcd?type=dict&file=${file}`;
-            fetch(url)
-                .then(r => r.arrayBuffer())
-                .then(() => fetchDic()) // 実際の Kuromoji 内部で使う場合は arrayBuffer を渡す
-                .catch(e => {
-                    console.error('辞書取得失敗:', file, e);
-                    fetchDic(); // 失敗しても次に進む
-                });
-        };
 
-        fetchDic();
-    });
-}
+// ===================================
+// 3. その他のUIイベント処理
+// ===================================
 
-// --- 変換エンジン ---
-function convertText(src) {
-    if (!src || !tokenizer) return '';
-    let result = '';
-    const tokens = tokenizer.tokenize(src);
+// Enterキーでの送信、Shift+Enterでの改行
+inputElement.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault(); // デフォルトの改行を防止
+        sendButton.click(); // 送信ボタンをクリック
+    }
+});
 
-    tokens.forEach(token => {
-        const surface = token?.surface || '';
-        let converted = surface;
+// チャットクリアボタン
+clearButton.addEventListener('click', () => {
+    if (confirm("本当にチャット履歴をクリアしますか？")) {
+        messagesContainer.innerHTML = ''; // メッセージコンテナの内容を空にする
+        // 必要に応じて、localStorageやサーバー側のセッションもクリアするロジックを追加
+    }
+});
 
-        if ($('opt-kana').checked && token?.reading) {
-            converted = kanaDict[token.reading] || kanaDict[converted] || converted;
-        }
-        if ($('opt-kanji').checked) {
-            converted = kanjiDict[token.surface] || converted;
-        }
-        if ($('opt-grammar').checked && Array.isArray(grammarList)) {
-            grammarList.forEach(g => {
-                if (!g?.from || !g?.to) return;
-                try { converted = converted.replace(new RegExp(g.from, 'g'), g.to); }
-                catch(e) { console.error('無効な正規表現:', g.from, e); }
-            });
-        }
-
-        result += converted;
-    });
-
-    return result;
-}
-
-// --- イベント ---
-document.addEventListener('DOMContentLoaded', async () => {
-    await initTokenizer();
-    await loadUserDicts();
-
-    $('convert').onclick = () => $('output').value = convertText($('input').value);
-    $('clear').onclick = () => { $('input').value = ''; $('output').value = ''; };
-    $('swap').onclick = () => { const t = $('input').value; $('input').value = $('output').value; $('output').value = t; };
-    $('load-sample').onclick = () => {
-        const sample = '今日は私の國學の話をします。私はおもいを語り、明日は學校へ行きます。';
-        $('input').value = sample;
-        $('output').value = convertText(sample);
-    };
+// 初期ウェルカムメッセージの表示 (ページロード時)
+document.addEventListener('DOMContentLoaded', () => {
+    // 最初の起動時に一度だけ表示
+    if (messagesContainer.children.length === 0) {
+        displayMessage("ようこそ！nodenへ。何でも質問してください。", 'msg-bot');
+    }
 });
