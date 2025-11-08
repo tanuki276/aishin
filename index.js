@@ -3,9 +3,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const userInput = document.getElementById('user-input');
     const sendButton = document.getElementById('send-button');
 
-    // Vercel上のAPIエンドポイント。この例では、ルートに対する相対パスを使用します。
-    // Vercelでホストした場合、`api/api.js` は `/api/api` というURLでアクセス可能になります。
-    const API_ENDPOINT = '/api/api';
+    // 修正: APIエンドポイントを /api/chat に変更
+    const API_ENDPOINT = '/api/chat';
 
     /**
      * メッセージをチャットウィンドウに追加する関数
