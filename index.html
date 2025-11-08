@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ノード</title>
+    <style>
+        /* === 基本的なレイアウト === */
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            display: flex; 
+            flex-direction: column; 
+            height: 100vh; 
+            margin: 0; 
+            background-color: #e5ddd5; /* WhatsApp風の背景色 */
+        }
+        #chat-container { 
+            flex-grow: 1; 
+            display: flex; 
+            flex-direction: column; 
+            overflow: hidden; 
+        }
+        #chat-window { 
+            flex-grow: 1; 
+            padding: 10px; 
+            overflow-y: auto; 
+            background-color: #e5ddd5; 
+        }
+
+        /* === メッセージのスタイル === */
+        .message-row {
+            display: flex;
+            margin-bottom: 8px;
+            max-width: 100%;
+        }
+        .message { 
+            padding: 10px 14px; 
+            border-radius: 18px; 
+            max-width: 75%;
+            word-wrap: break-word;
+            box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+        }
+        .user-message { 
+            background-color: #dcf8c6; 
+            margin-left: auto;
+            border-bottom-right-radius: 4px; /* 視覚的な調整 */
+        }
+        .bot-message { 
+            background-color: #ffffff; 
+            margin-right: auto; 
+            border-bottom-left-radius: 4px; /* 視覚的な調整 */
+        }
+        
+        /* === 入力エリアの調整 === */
+        #input-area { 
+            display: flex; 
+            padding: 8px 10px; 
+            background-color: #f0f0f0; 
+            align-items: center;
+            box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.1);
+        }
+        #user-input { 
+            flex-grow: 1; 
+            padding: 10px 15px; 
+            border: none; 
+            border-radius: 20px; 
+            margin-right: 8px;
+            font-size: 16px;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        #send-button { 
+            /* ボタンを円形に近い形状に */
+            width: 44px;
+            height: 44px;
+            min-width: 44px;
+            border: none; 
+            border-radius: 50%; /* 完全な円形 */
+            background-color: #0084ff; /* 目立つ青色 */
+            color: white; 
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        /* 使いやすさ: ホバー時のエフェクト */
+        #send-button:hover:not(:disabled) {
+            background-color: #0066cc;
+        }
+        #send-button:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+        /* 使いやすさ: 無効化されたボタンのスタイル */
+        #send-button:disabled { 
+            background-color: #a8a8a8; 
+            cursor: not-allowed; 
+        }
+        /* 送信アイコン（シンプルな矢印を使用）*/
+        #send-button::after {
+            content: '▶'; /* 矢印の記号を使用 */
+            font-size: 18px;
+            margin-left: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div id="chat-container">
+        <div id="chat-window">
+            <div class="message-row">
+                <div class="message bot-message">ようこそ。何でも聞いてください。</div>
+            </div>
+        </div>
+    </div>
