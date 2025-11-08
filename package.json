@@ -1,11 +1,21 @@
 {
-  "name": "vercel-chatbot",
+  "name": "node-chat-bot",
   "version": "1.0.0",
+  "description": "A simple Node.js chat bot based on the provided api.js logic.",
+  "main": "api.js",
+  "scripts": {
+    "start": "node api.js"
+  },
+  "keywords": [
+    "chat-bot",
+    "node-js",
+    "kuromoji"
+  ],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
     "kuromoji": "^0.1.2",
-    "node-fetch": "^2.6.1"
-  },
-  "scripts": {
-    "start": "npx http-server public"
+    "node-fetch": "^2.6.1",
+    "undici": "^6.0.0"
   }
 }
