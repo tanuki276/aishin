@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
-const dataPath = path.join(__dirname, 'data.json');
+// data.jsonへのパスは、__dirnameがapiディレクトリを指すため、変更なし
+const dataPath = path.join(__dirname, 'data.json'); 
 let knowledgeBase = {};
 try {
   const rawData = fs.readFileSync(dataPath, 'utf8');
