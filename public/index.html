@@ -1,29 +1,292 @@
-<!DOCTYPE html>
-<html lang="ja">
+<!DOCTYPE html><html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ソ連</title>
-    <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; margin: 0; background-color: #f4f7f6; }
-        #chat-window { flex-grow: 1; padding: 20px; overflow-y: auto; background-color: #fff; border-bottom: 1px solid #ddd; }
-        .message { margin-bottom: 10px; padding: 8px 12px; border-radius: 15px; max-width: 70%; }
-        .user-message { background-color: #dcf8c6; margin-left: auto; text-align: right; }
-        .bot-message { background-color: #f0f0f0; margin-right: auto; text-align: left; }
-        #input-area { display: flex; padding: 10px; background-color: #eee; }
-        #user-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; margin-right: 10px; }
-        #send-button { padding: 10px 15px; border: none; border-radius: 20px; background-color: #007bff; color: white; cursor: pointer; }
-        #send-button:disabled { background-color: #ccc; cursor: not-allowed; }
-    </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>神チャット UI — Pro</title>
+<style>
+:root{
+  --bg-1:#0f1724; /* deep */
+  --bg-2:#081325; /* darker */
+  --accent-1:#00e0ff; /* cyan */
+  --accent-2:#ff4dd2; /* magenta */
+  --glass: rgba(255,255,255,0.04);
+  --muted: rgba(255,255,255,0.65);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;color:#e6eef6}
+body{
+  background: radial-gradient(1200px 600px at 10% 10%, rgba(0,224,255,0.06), transparent 8%),
+              radial-gradient(900px 400px at 90% 90%, rgba(255,77,210,0.04), transparent 8%),
+              linear-gradient(180deg,var(--bg-1),var(--bg-2));
+  -webkit-font-smoothing:antialiased;
+  display:flex;align-items:center;justify-content:center;padding:24px;
+}
+.app{
+  width:min(1100px,98vw);
+  height:min(820px,96vh);
+  display:grid;
+  grid-template-columns:320px 1fr;
+  gap:18px;
+  background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border-radius:18px; padding:18px; box-shadow: 0 10px 60px rgba(2,6,23,0.6);
+  overflow:hidden; position:relative;
+}
+/* Sidebar */
+.sidebar{
+  background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border-radius:12px; padding:14px; display:flex;flex-direction:column;gap:12px;min-width:260px;height:100%;
+}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,var(--accent-1),var(--accent-2));display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,0.4);font-weight:700}
+.brand h1{font-size:16px;margin:0}
+.search{display:flex;gap:8px;align-items:center}
+.input{background:var(--glass);border-radius:10px;padding:8px 10px;color:var(--muted);border:1px solid rgba(255,255,255,0.03);display:flex;align-items:center}
+.input input{background:transparent;border:0;outline:none;color:inherit;width:100%}
+.conversations{flex:1;overflow:auto;padding-right:6px}
+.conv{display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;cursor:pointer;transition:background .18s, transform .12s}
+.conv:hover{background:rgba(255,255,255,0.02);transform:translateY(-2px)}
+.avatar{width:44px;height:44px;border-radius:10px;flex-shrink:0;background:linear-gradient(135deg,#fff2, #fff0);display:flex;align-items:center;justify-content:center;font-weight:700;color:#000}
+.conv .meta{flex:1;min-width:0}
+.conv .meta .title{font-weight:600}
+.conv .meta .sub{font-size:12px;color:rgba(230,238,246,0.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Chat panel */
+.chat-panel{display:flex;flex-direction:column;height:100%;gap:12px}
+.header{display:flex;align-items:center;justify-content:space-between;padding:12px;border-radius:12px;background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))}
+.h-left{display:flex;align-items:center;gap:12px}
+.h-title{font-weight:700}
+.h-actions{display:flex;gap:10px;align-items:center}
+.icon-btn{width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,0.03);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .12s, background .12s}
+.icon-btn:hover{transform:translateY(-3px);background:rgba(255,255,255,0.06)}
+/* Messages area */
+.messages{flex:1;padding:18px;overflow:auto;display:flex;flex-direction:column;gap:12px}
+.message{
+  max-width:72%;padding:12px 14px;border-radius:14px;position:relative;word-break:break-word;box-shadow:0 8px 24px rgba(2,6,23,0.5);
+  transform-origin:bottom right;opacity:0;transform:translateY(8px) scale(.98);
+  animation:fadeUp .35s ease forwards;
+}
+@keyframes fadeUp{to{opacity:1;transform:translateY(0) scale(1)}}
+.msg-user{margin-left:auto;background:linear-gradient(135deg,var(--accent-1),#60f2a8);color:#042027;border-bottom-right-radius:6px}
+.msg-bot{margin-right:auto;background:linear-gradient(135deg,#0b1226,transparent);border:1px solid rgba(255,255,255,0.03);color:var(--muted);border-bottom-left-radius:6px}
+.msg-meta{font-size:11px;color:rgba(230,238,246,0.55);margin-top:6px;display:flex;gap:8px;align-items:center}
+.msg-time{opacity:0.8}
+/* Typing indicator */
+.typing{display:inline-flex;gap:6px;align-items:center}
+.typing .dot{width:8px;height:8px;border-radius:50%;background:var(--accent-1);opacity:0.2;animation:blink 1s infinite}
+.typing .dot:nth-child(2){animation-delay:.15s}
+.typing .dot:nth-child(3){animation-delay:.3s}
+@keyframes blink{0%{opacity:0.15;transform:translateY(0)}50%{opacity:1;transform:translateY(-6px)}100%{opacity:0.15;transform:translateY(0)}}
+/* Input area */
+.composer{display:flex;gap:12px;padding:12px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0.01));align-items:flex-end}
+.textarea{flex:1;position:relative}
+textarea{width:100%;min-height:48px;max-height:160px;resize:none;padding:12px 14px;border-radius:12px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit;outline:none;font-size:15px}
+.row-actions{display:flex;flex-direction:column;gap:8px}
+.send-btn{width:56px;height:56px;border-radius:999px;background:linear-gradient(135deg,var(--accent-2),var(--accent-1));display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,0.5);border:none;color:#061018;font-weight:700;transition:transform .15s}
+.send-btn:hover{transform:translateY(-6px) rotate(-6deg)}
+.send-btn:active{transform:scale(.98)}
+.small{font-size:12px;color:rgba(230,238,246,0.7)}
+/* Reaction bubble */
+.reaction-palette{position:absolute;display:flex;gap:6px;padding:6px;background:linear-gradient(90deg, rgba(0,0,0,0.5), rgba(255,255,255,0.02));border-radius:999px;border:1px solid rgba(255,255,255,0.04);box-shadow:0 10px 30px rgba(0,0,0,0.6)}
+.reaction{padding:6px;border-radius:50%;cursor:pointer;transition:transform .12s}
+.reaction:hover{transform:translateY(-4px)}
+/* Status bar */
+.status{display:flex;gap:10px;align-items:center}
+.toggle{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.02);padding:6px;border-radius:10px}
+/* helper */
+.center{display:flex;align-items:center;justify-content:center}
+.hint{font-size:13px;color:rgba(230,238,246,0.55)}
+/* mobile tweaks */
+@media(max-width:880px){.app{grid-template-columns:1fr;height:92vh}.sidebar{display:none}}
+</style>
 </head>
 <body>
-    <div id="chat-window">
-        <div class="message bot-message">ようこそ。何でも聞いてください。</div>
+<div class="app" role="application">
+  <aside class="sidebar" aria-label="会話一覧">
+    <div class="brand">
+      <div class="logo">jsai</div>
+      <div>
+        <h1>ノード</h1>
+        <div class="small">自作JSAI</div>
+      </div>
+    </div><div class="search">
+  <div class="input" title="検索">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="opacity:.9"><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="1.6"/></svg>
+    <input id="conv-search" placeholder="検索 or 新規作成" aria-label="会話検索">
+  </div>
+</div>
+
+<div class="conversations" id="conversations" role="list">
+  <!-- JS will populate conversations -->
+</div>
+
+<div class="status">
+  <div class="toggle" id="sound-toggle" title="送信音オン/オフ">🔊 <span class="small">音</span></div>
+  <div class="toggle" id="theme-toggle" title="テーマ切替">🌗 <span class="small">テーマ</span></div>
+  <div class="hint" style="margin-left:auto">保存: localStorage</div>
+</div>
+
+  </aside>  <main class="chat-panel" aria-live="polite">
+    <div class="header">
+      <div class="h-left">
+        <div class="h-title">ノード</div>
+        <div class="small">自作JSAI</div>
+      </div>
+      <div class="h-actions">
+        <button class="icon-btn" id="clear-btn" title="チャットをクリア">🗑</button>
+        <button class="icon-btn" id="export-btn" title="ログをエクスポート">⬇️</button>
+      </div>
+    </div><section class="messages" id="messages" aria-label="メッセージ一覧">
+  <!-- messages injected by JS -->
+</section>
+
+<form class="composer" id="composer" onsubmit="return false;">
+  <div class="textarea">
+    <textarea id="input" placeholder="Shift+Enterで改行 — Enterで送信" aria-label="メッセージ入力"></textarea>
+    <div style="position:absolute;right:12px;bottom:10px;display:flex;gap:8px;align-items:center">
+      <button type="button" id="emoji-btn" class="icon-btn" title="絵文字">😊</button>
     </div>
-    <div id="input-area">
-        <input type="text" id="user-input" placeholder="メッセージを入力してください..." autofocus>
-        <button id="send-button">送信</button>
-    </div>
-    <script src="index.js"></script>
-</body>
+  </div>
+  <div class="row-actions">
+    <button class="send-btn" id="send" title="送信">➤</button>
+  </div>
+</form>
+
+  </main>
+</div><!-- reaction palette template --><template id="reaction-template">
+  <div class="reaction-palette">
+    <div class="reaction">👍</div>
+    <div class="reaction">❤️</div>
+    <div class="reaction">🔥</div>
+    <div class="reaction">😮</div>
+    <div class="reaction">😂</div>
+  </div>
+</template><script>
+// --- Helpers ---
+const $ = (s, root=document) => root.querySelector(s);
+const $$ = (s, root=document) => Array.from(root.querySelectorAll(s));
+const nowTime = ()=> new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+
+// --- Persistence ---
+const STORAGE_KEY = 'kami_chat_pro_v1';
+let state = {conversations:[], active: null};
+function load(){ try{ const raw = localStorage.getItem(STORAGE_KEY); if(raw) state = JSON.parse(raw); }catch(e){} }
+function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+// --- Initial convs ---
+function ensureExample(){ if(state.conversations.length===0){ const id = uid(); state.conversations.push({id,title:'はじめの会話',messages:[{id:uid(),role:'bot',text:'で、何をする気だ？',time:nowTime()}]}); state.active = id; save(); }}
+
+// --- UID ---
+function uid(){ return Math.random().toString(36).slice(2,9); }
+
+// --- Render conversations list ---
+const convContainer = $('#conversations');
+function renderConversations(filter=''){
+  convContainer.innerHTML='';
+  state.conversations.filter(c=> c.title.toLowerCase().includes(filter.toLowerCase()) || (c.messages && c.messages.some(m=>m.text.toLowerCase().includes(filter.toLowerCase())))).forEach(c=>{
+    const el = document.createElement('div'); el.className='conv'; el.setAttribute('role','listitem');
+    el.innerHTML = `<div class="avatar">${c.title.slice(0,2)}</div><div class="meta"><div class="title">${c.title}</div><div class="sub">${c.messages?.slice(-1)[0]?.text?.slice(0,36) ?? ''}</div></div>`;
+    el.addEventListener('click', ()=>{ state.active = c.id; save(); render(); });
+    convContainer.appendChild(el);
+  });
+}
+
+// --- Render messages ---
+const messagesEl = $('#messages');
+function renderMessages(){ messagesEl.innerHTML=''; if(!state.active) return;
+  const conv = state.conversations.find(c=>c.id===state.active);
+  if(!conv) return;
+  conv.messages.forEach(m=>{
+    const el = document.createElement('div'); el.className='message '+(m.role==='user'?'msg-user':'msg-bot');
+    el.dataset.id = m.id;
+    el.innerHTML = `<div class="content">${escapeHtml(m.text)}</div><div class="msg-meta"><div class="msg-time">${m.time}</div></div>`;
+
+    // reaction on longpress / click
+    el.addEventListener('contextmenu', (e)=>{ e.preventDefault(); openReactions(el); });
+    messagesEl.appendChild(el);
+  });
+  // auto scroll to bottom
+  requestAnimationFrame(()=> messagesEl.scrollTop = messagesEl.scrollHeight);
+}
+
+// --- Escape ---
+function escapeHtml(s){ return s.replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[c]); }
+
+// --- Composer ---
+const input = $('#input'); const sendBtn = $('#send'); const emojiBtn = $('#emoji-btn');
+input.addEventListener('keydown', (e)=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); handleSend(); }
+});
+sendBtn.addEventListener('click', handleSend);
+
+function handleSend(){ const text = input.value.trim(); if(!text) return; sendUserMessage(text); input.value=''; input.focus(); }
+
+function sendUserMessage(text){ const conv = state.conversations.find(c=>c.id===state.active); if(!conv) return; const m={id:uid(),role:'user',text, time:nowTime()}; conv.messages.push(m); save(); render(); playSend(); // bot reply simulated streaming
+  simulateBotReply(conv, text);
+}
+
+// --- Simulate streaming bot reply (タイプライター) ---
+let typingTimer=null;
+function simulateBotReply(conv, userText){ // create a placeholder
+  const replyId = uid(); const placeholder = {id:replyId, role:'bot', text:'', time:nowTime(), streaming:true}; conv.messages.push(placeholder); save(); render();
+  const response = craftResponse(userText);
+  let i=0; function tick(){ if(i>=response.length){ placeholder.streaming=false; placeholder.time=nowTime(); save(); render(); return; }
+    placeholder.text += response[i++]; if(i%3===0) placeholder.time=nowTime(); save(); render(); typingTimer = setTimeout(tick, 30 + Math.random()*40);
+  }
+  setTimeout(tick, 350 + Math.random()*120);
+}
+
+function craftResponse(user){ // quick 'AI' flavor — punchy and concise
+  const base = [
+    `了解。${user} — いいね、やるぞ。`,
+    `それ、要点を3つでまとめると: 1) 準備 2) 実行 3) 検証。`,
+  ];
+  return base[Math.floor(Math.random()*base.length)];
+}
+
+// --- Rendering controller ---
+function render(){ renderConversations($('#conv-search').value); renderMessages(); }
+
+// --- Reactions ---
+function openReactions(target){ closePalette(); const tpl = $('#reaction-template'); const clone = tpl.content.firstElementChild.cloneNode(true);
+  document.body.appendChild(clone);
+  const rect = target.getBoundingClientRect(); clone.style.top = (rect.top - 50)+'px'; clone.style.left = (rect.left)+'px';
+  clone.addEventListener('click', (e)=>{ if(e.target.classList.contains('reaction')){ attachReaction(target.dataset.id, e.target.textContent); closePalette(); }});
+  clone.dataset.attachedTo = target.dataset.id;
+}
+function closePalette(){ $$('.reaction-palette').forEach(el=>el.remove()); }
+function attachReaction(msgId, r){ const conv = state.conversations.find(c=>c.id===state.active); const m = conv.messages.find(x=>x.id===msgId); m.reaction = r; save(); render(); }
+
+// --- Sound ---
+let soundOn = true; const soundToggle = $('#sound-toggle'); soundToggle.addEventListener('click', ()=>{ soundOn=!soundOn; soundToggle.style.opacity = soundOn?1:0.5; });
+function playSend(){ if(!soundOn) return; try{ const ctx = new (window.AudioContext || window.webkitAudioContext)(); const o = ctx.createOscillator(); const g = ctx.createGain(); o.type='sine'; o.frequency.value=880; g.gain.value=0.0001; o.connect(g); g.connect(ctx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime+0.01); g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+0.12); o.stop(ctx.currentTime+0.15);}catch(e){}
+}
+
+// --- Export / Clear ---
+$('#clear-btn').addEventListener('click', ()=>{
+  if(!confirm('全チャットを消しますか？')) return; state.conversations=[]; state.active=null; ensureExample(); save(); render();
+});
+$('#export-btn').addEventListener('click', ()=>{
+  const data = JSON.stringify(state, null, 2); const blob = new Blob([data], {type:'application/json'}); const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download = 'kami_chat_export_'+new Date().toISOString()+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+});
+
+// --- Emoji picker (minimal) ---
+emojiBtn.addEventListener('click', ()=>{
+  const list = ['😄','🔥','👍','🤔','💡','🎯','🚀','🙏']; const p = document.createElement('div'); p.style.position='absolute'; p.style.bottom='90px'; p.style.right='28px'; p.style.padding='8px'; p.style.display='flex'; p.style.gap='8px'; p.style.background='rgba(0,0,0,0.5)'; p.style.borderRadius='12px'; p.style.zIndex=9999; list.forEach(e=>{ const b=document.createElement('button'); b.className='icon-btn'; b.textContent=e; b.style.width='44px'; b.style.height='44px'; b.style.borderRadius='8px'; b.addEventListener('click', ()=>{ input.value += e; input.focus(); p.remove(); }); p.appendChild(b); }); document.body.appendChild(p); setTimeout(()=>{ document.addEventListener('click', function h(ev){ if(!p.contains(ev.target) && ev.target!==emojiBtn){ p.remove(); document.removeEventListener('click',h);} }); },50);
+});
+
+// --- Search & create conv ---
+$('#conv-search').addEventListener('input', (e)=> renderConversations(e.target.value));
+$('#conv-search').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ const title = e.target.value.trim()||'新しい会話'; const id=uid(); state.conversations.unshift({id,title,messages:[]}); state.active=id; e.target.value=''; save(); render(); }});
+
+// --- Theme toggle (simple) ---
+$('#theme-toggle').addEventListener('click', ()=>{
+  document.body.classList.toggle('alt-theme'); const t=document.body.classList.contains('alt-theme'); if(t){ document.documentElement.style.setProperty('--accent-1','#7c5cff'); document.documentElement.style.setProperty('--accent-2','#00ffd1'); }else{ document.documentElement.style.setProperty('--accent-1','#00e0ff'); document.documentElement.style.setProperty('--accent-2','#ff4dd2'); }
+});
+
+// --- Boot ---
+load(); ensureExample(); render();
+
+// expose for debugging
+window.kami_state = state; window.kami_save = save;
+</script></body>
 </html>
