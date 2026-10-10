@@ -1,5 +1,4 @@
-const DEFAULT_MODEL = process.env.LLM_MODEL || 'openai/gpt-5.5';
-const DEFAULT_REASONING = process.env.LLM_REASONING || 'medium';
+const DEFAULT_MODEL = process.env.LLM_MODEL || 'openai/gpt-6-astra';
 
 function authLikelyAvailable() {
   return Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL || process.env.VERCEL_ENV || process.env.VERCEL_OIDC_TOKEN);
@@ -15,8 +14,8 @@ async function generateAnswer({ history, userMessage, searchQuery, knowledge, pe
   try {
     const { generateText } = await import('ai');
     const previous = (history || []).slice(-12, -1)
-      .filter((m) => m && (m.role === 'user' || m.role === 'bot') && m.text)
-      .map((m) => ({ role: m.role === 'bot' ? 'assistant' : 'user', content: String(m.text).slice(0, 1800) }));
+      .filter((m) => m && (m.role === 'user' || m.role === 'bot' || m.role === 'assistant') && m.text)
+      .map((m) => ({ role: m.role === 'bot' ? 'assistant' : m.role, content: String(m.text).slice(0, 1800) }));
 
     const system = [
       'あなたは日本語で会話する高精度なアシスタントです。',
@@ -35,7 +34,7 @@ async function generateAnswer({ history, userMessage, searchQuery, knowledge, pe
       system,
       messages: [...previous, { role: 'user', content: prompt }],
       maxOutputTokens: 1200,
-      reasoning: DEFAULT_REASONING
+      timeout: 20000
     });
     const text = result?.text ? String(result.text).trim() : '';
     return text ? { text, model: DEFAULT_MODEL } : null;
