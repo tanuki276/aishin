@@ -1,20 +1,26 @@
 {
   "name": "node-chat-bot",
-  "version": "1.0.0",
-  "description": "A Japanese chat bot for Vercel Serverless Functions using kuromoji and public knowledge APIs.",
+  "version": "2.0.0",
+  "description": "A grounded Japanese AI chat bot for Vercel Serverless Functions.",
   "main": "api/chat.js",
+  "scripts": {
+    "test": "node --test"
+  },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "keywords": [
     "chat-bot",
     "node-js",
     "kuromoji",
-    "vercel"
+    "vercel",
+    "llm",
+    "rag"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "ai": "7.0.122",
     "kuromoji": "^0.1.2",
     "node-fetch": "^2.6.1",
     "undici": "^6.0.0"
